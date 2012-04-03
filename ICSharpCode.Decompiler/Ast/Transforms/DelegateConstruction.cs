@@ -397,8 +397,14 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 						capturedVariableName = capturedVariableName.Substring(10);
 					EnsureVariableNameIsAvailable(blockStatement, capturedVariableName);
 					currentlyUsedVariableNames.Add(capturedVariableName);
+					ILVariable ilVar = new ILVariable
+					{
+						IsGenerated = true,
+						Name = capturedVariableName,
+						Type = field.FieldType,
+					};
 					variablesToDeclare.Add(Tuple.Create(AstBuilder.ConvertType(field.FieldType, field), capturedVariableName));
-					dict[field] = new IdentifierExpression(capturedVariableName);
+					dict[field] = new IdentifierExpression(capturedVariableName).WithAnnotation(ilVar);
 				}
 				
 				// Now figure out where the closure was accessed and use the simpler replacement expression there:
@@ -407,7 +413,7 @@ namespace ICSharpCode.Decompiler.Ast.Transforms
 						MemberReferenceExpression mre = (MemberReferenceExpression)identExpr.Parent;
 						AstNode replacement;
 						if (dict.TryGetValue(mre.Annotation<FieldReference>().ResolveWithinSameModule(), out replacement)) {
-							mre.ReplaceWith(replacement.Clone());
+							mre.ReplaceWith(replacement.Clone().CopyAnnotationsFrom(replacement));
 						}
 					}
 				}
