@@ -29,10 +29,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using System.Xml;
-
 using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Editing;
@@ -40,11 +40,13 @@ using ICSharpCode.AvalonEdit.Folding;
 using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Highlighting.Xshd;
 using ICSharpCode.AvalonEdit.Rendering;
+using ICSharpCode.AvalonEdit.Search;
 using ICSharpCode.Decompiler;
 using ICSharpCode.ILSpy.AvalonEdit;
 using ICSharpCode.ILSpy.Bookmarks;
 using ICSharpCode.ILSpy.Debugger;
 using ICSharpCode.ILSpy.Debugger.Bookmarks;
+using ICSharpCode.ILSpy.Debugger.Services;
 using ICSharpCode.ILSpy.Options;
 using ICSharpCode.ILSpy.TreeNodes;
 using ICSharpCode.ILSpy.XmlDoc;
@@ -68,11 +70,13 @@ namespace ICSharpCode.ILSpy.TextView
 		ILSpyTreeNode[] decompiledNodes;
 		
 		DefinitionLookup definitionLookup;
+		TextSegmentCollection<ReferenceSegment> references;
 		CancellationTokenSource currentCancellationTokenSource;
 		
 		internal readonly IconBarManager manager;
 		readonly IconBarMargin iconMargin;
 		readonly TextMarkerService textMarkerService;
+		readonly List<ITextMarker> localReferenceMarks = new List<ITextMarker>();
 		
 		[ImportMany(typeof(ITextEditorListener))]
 		IEnumerable<ITextEditorListener> textEditorListeners = null;
@@ -117,6 +121,7 @@ namespace ICSharpCode.ILSpy.TextView
 			
 			// Bookmarks context menu
 			IconMarginActionsProvider.Add(iconMargin);
+			textEditor.TextArea.DefaultInputHandler.NestedInputHandlers.Add(new SearchInputHandler(textEditor.TextArea));
 			
 			this.Loaded += new RoutedEventHandler(DecompilerTextView_Loaded);
 		}
@@ -177,7 +182,7 @@ namespace ICSharpCode.ILSpy.TextView
 			TextViewPosition? position = textEditor.TextArea.TextView.GetPosition(e.GetPosition(textEditor.TextArea.TextView) + textEditor.TextArea.TextView.ScrollOffset);
 			if (position == null)
 				return;
-			int offset = textEditor.Document.GetOffset(position.Value);
+			int offset = textEditor.Document.GetOffset(position.Value.Location);
 			ReferenceSegment seg = referenceElementGenerator.References.FindSegmentsContaining(offset).FirstOrDefault();
 			if (seg == null)
 				return;
@@ -257,7 +262,13 @@ namespace ICSharpCode.ILSpy.TextView
 					if (currentCancellationTokenSource == myCancellationTokenSource) {
 						currentCancellationTokenSource = null;
 						waitAdorner.Visibility = Visibility.Collapsed;
-						taskCompleted(task);
+						if (task.IsCanceled) {
+							AvalonEditTextOutput output = new AvalonEditTextOutput();
+							output.WriteLine("The operation was canceled.");
+							ShowOutput(output);
+						} else {
+							taskCompleted(task);
+						}
 					} else {
 						try {
 							task.Wait();
@@ -315,7 +326,8 @@ namespace ICSharpCode.ILSpy.TextView
 		{
 			Debug.WriteLine("Showing {0} characters of output", textOutput.TextLength);
 			Stopwatch w = Stopwatch.StartNew();
-			
+
+			ClearLocalReferenceMarks();
 			textEditor.ScrollToHome();
 			if (foldingManager != null) {
 				FoldingManager.Uninstall(foldingManager);
@@ -324,6 +336,7 @@ namespace ICSharpCode.ILSpy.TextView
 			textEditor.Document = null; // clear old document while we're changing the highlighting
 			uiElementGenerator.UIElements = textOutput.UIElements;
 			referenceElementGenerator.References = textOutput.References;
+			references = textOutput.References;
 			definitionLookup = textOutput.DefinitionLookup;
 			textEditor.SyntaxHighlighting = highlighting;
 			
@@ -350,6 +363,21 @@ namespace ICSharpCode.ILSpy.TextView
 				foldingManager = FoldingManager.Install(textEditor.TextArea);
 				foldingManager.UpdateFoldings(textOutput.Foldings.OrderBy(f => f.StartOffset), -1);
 				Debug.WriteLine("  Updating folding: {0}", w.Elapsed); w.Restart();
+			}
+			
+			// update debugger info
+			DebugInformation.CodeMappings = textOutput.DebuggerMemberMappings.ToDictionary(m => m.MetadataToken);
+			
+			// update class bookmarks
+			var document = textEditor.Document;
+			manager.Bookmarks.Clear();
+			foreach (var pair in textOutput.DefinitionLookup.definitions) {
+				MemberReference member = pair.Key as MemberReference;
+				int offset = pair.Value;
+				if (member != null) {
+					int line = document.GetLocation(offset).Line;
+					manager.Bookmarks.Add(new MemberBookmark(member, line));
+				}
 			}
 		}
 		#endregion
@@ -447,7 +475,7 @@ namespace ICSharpCode.ILSpy.TextView
 			iconMargin.SyncBookmarks();
 			
 			if (isDecompilationOk) {
-				if (DebugInformation.DebugStepInformation != null) {
+				if (DebugInformation.DebugStepInformation != null && DebuggerService.CurrentDebugger != null) {
 					// repaint bookmarks
 					iconMargin.InvalidateVisual();
 					
@@ -458,12 +486,12 @@ namespace ICSharpCode.ILSpy.TextView
 					MemberReference member;
 					if (DebugInformation.CodeMappings == null || !DebugInformation.CodeMappings.ContainsKey(token))
 						return;
-					
-					DebugInformation.CodeMappings[token].GetInstructionByTokenAndOffset(token, ilOffset, out member, out line);
+
+					if (!DebugInformation.CodeMappings[token].GetInstructionByTokenAndOffset(ilOffset, out member, out line))
+						return;
 					
 					// update marker
-					CurrentLineBookmark.Remove();
-					CurrentLineBookmark.SetPosition(member, line, 0, line, 0);
+					DebuggerService.JumpToCurrentLine(member, line, 0, line, 0, ilOffset);
 
 					var bm = CurrentLineBookmark.Instance;
 					DocumentLine docline = textEditor.Document.GetLineByNumber(line);
@@ -499,10 +527,12 @@ namespace ICSharpCode.ILSpy.TextView
 							DecompileNodes(context, textOutput);
 							textOutput.PrepareDocument();
 							tcs.SetResult(textOutput);
+						} catch (OutputLengthExceededException ex) {
+							tcs.SetException(ex);
 						} catch (AggregateException ex) {
 							tcs.SetException(ex);
-						} catch (OperationCanceledException ex) {
-							tcs.SetException(ex);
+						} catch (OperationCanceledException) {
+							tcs.SetCanceled();
 						}
 					} else
 						#endif
@@ -513,6 +543,8 @@ namespace ICSharpCode.ILSpy.TextView
 							DecompileNodes(context, textOutput);
 							textOutput.PrepareDocument();
 							tcs.SetResult(textOutput);
+						} catch (OperationCanceledException) {
+							tcs.SetCanceled();
 						} catch (Exception ex) {
 							tcs.SetException(ex);
 						}
@@ -524,16 +556,7 @@ namespace ICSharpCode.ILSpy.TextView
 		
 		void DecompileNodes(DecompilationContext context, ITextOutput textOutput)
 		{
-			// reset data
-			DebugInformation.OldCodeMappings = DebugInformation.CodeMappings;
-			DebugInformation.CodeMappings = null;
-			DebugInformation.LocalVariables = null;
-			DebugInformation.DecompiledMemberReferences = null;
-			// set the language
-			DebugInformation.Language = MainWindow.Instance.sessionSettings.FilterSettings.Language.Name.StartsWith("IL") ? DecompiledLanguages.IL : DecompiledLanguages.CSharp;
-			
 			var nodes = context.TreeNodes;
-			context.Language.DecompileFinished += Language_DecompileFinished;
 			for (int i = 0; i < nodes.Length; i++) {
 				if (i > 0)
 					textOutput.WriteLine();
@@ -541,34 +564,7 @@ namespace ICSharpCode.ILSpy.TextView
 				context.Options.CancellationToken.ThrowIfCancellationRequested();
 				nodes[i].Decompile(context.Language, textOutput, context.Options);
 			}
-			context.Language.DecompileFinished -= Language_DecompileFinished;
 		}
-		
-		void Language_DecompileFinished(object sender, DecompileEventArgs e)
-		{
-			if (e != null) {
-				manager.UpdateClassMemberBookmarks(e.AstNodes, typeof(TypeBookmark), typeof(MemberBookmark));
-				if (iconMargin.DecompiledMembers == null) {
-					iconMargin.DecompiledMembers = new List<MemberReference>();
-				}
-				iconMargin.DecompiledMembers.AddRange(e.DecompiledMemberReferences.Values.AsEnumerable());
-				
-				// debugger info
-				if (DebugInformation.CodeMappings == null) {
-					DebugInformation.CodeMappings = e.CodeMappings;
-					DebugInformation.LocalVariables = e.LocalVariables;
-					DebugInformation.DecompiledMemberReferences = e.DecompiledMemberReferences;
-				} else {
-					DebugInformation.CodeMappings.AddRange(e.CodeMappings);
-					DebugInformation.DecompiledMemberReferences.AddRange(e.DecompiledMemberReferences);
-					if (e.LocalVariables != null)
-						DebugInformation.LocalVariables.AddRange(e.LocalVariables);
-				}
-			} else {
-				manager.UpdateClassMemberBookmarks(null, typeof(TypeBookmark), typeof(MemberBookmark));
-			}
-		}
-
 		#endregion
 		
 		#region WriteOutputLengthExceededMessage
@@ -601,7 +597,7 @@ namespace ICSharpCode.ILSpy.TextView
 			output.WriteLine();
 		}
 		#endregion
-		
+
 		#region JumpToReference
 		/// <summary>
 		/// Jumps to the definition referred to by the <see cref="ReferenceSegment"/>.
@@ -609,6 +605,19 @@ namespace ICSharpCode.ILSpy.TextView
 		internal void JumpToReference(ReferenceSegment referenceSegment)
 		{
 			object reference = referenceSegment.Reference;
+			if (referenceSegment.IsLocal) {
+				ClearLocalReferenceMarks();
+				if (references != null) {
+					foreach (var r in references) {
+						if (reference.Equals(r.Reference)) {
+							var mark = textMarkerService.Create(r.StartOffset, r.Length);
+							mark.BackgroundColor = r.IsLocalTarget ? Colors.LightSeaGreen : Colors.GreenYellow;
+							localReferenceMarks.Add(mark);
+						}
+					}
+				}
+				return;
+			}
 			if (definitionLookup != null) {
 				int pos = definitionLookup.GetDefinitionPosition(reference);
 				if (pos >= 0) {
@@ -623,6 +632,14 @@ namespace ICSharpCode.ILSpy.TextView
 				}
 			}
 			MainWindow.Instance.JumpToReference(reference);
+		}
+
+		void ClearLocalReferenceMarks()
+		{
+			foreach (var mark in localReferenceMarks) {
+				textMarkerService.Remove(mark);
+			}
+			localReferenceMarks.Clear();
 		}
 		
 		/// <summary>
@@ -711,9 +728,9 @@ namespace ICSharpCode.ILSpy.TextView
 						output.AddButton(null, "Open Explorer", delegate { Process.Start("explorer", "/select,\"" + fileName + "\""); });
 						output.WriteLine();
 						tcs.SetResult(output);
+					} catch (OperationCanceledException) {
+						tcs.SetCanceled();
 						#if DEBUG
-					} catch (OperationCanceledException ex) {
-						tcs.SetException(ex);
 					} catch (AggregateException ex) {
 						tcs.SetException(ex);
 						#else
@@ -743,6 +760,15 @@ namespace ICSharpCode.ILSpy.TextView
 			return text;
 		}
 		#endregion
+
+		internal ReferenceSegment GetReferenceSegmentAtMousePosition()
+		{
+			TextViewPosition? position = textEditor.TextArea.TextView.GetPosition(Mouse.GetPosition(textEditor.TextArea.TextView) + textEditor.TextArea.TextView.ScrollOffset);
+			if (position == null)
+				return null;
+			int offset = textEditor.Document.GetOffset(position.Value.Location);
+			return referenceElementGenerator.References.FindSegmentsContaining(offset).FirstOrDefault();
+		}
 
 		public DecompilerTextViewState GetState()
 		{

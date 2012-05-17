@@ -26,9 +26,9 @@ namespace ICSharpCode.ILSpy.TreeNodes
 {
 	class DerivedTypesEntryNode : ILSpyTreeNode, IMemberTreeNode
 	{
-		private TypeDefinition type;
-		private AssemblyDefinition[] assemblies;
-		private ThreadingSupport threading;
+		private readonly TypeDefinition type;
+		private readonly AssemblyDefinition[] assemblies;
+		private readonly ThreadingSupport threading;
 
 		public DerivedTypesEntryNode(TypeDefinition type, AssemblyDefinition[] assemblies)
 		{
@@ -65,11 +65,9 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			} else
 				return FilterResult.Recurse;
 		}
-
-		public bool IsPublicAPI
-		{
-			get
-			{
+		
+		public override bool IsPublicAPI {
+			get {
 				switch (type.Attributes & TypeAttributes.VisibilityMask) {
 					case TypeAttributes.Public:
 					case TypeAttributes.NestedPublic:

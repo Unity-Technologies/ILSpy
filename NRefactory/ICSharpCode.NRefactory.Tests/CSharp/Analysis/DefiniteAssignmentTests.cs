@@ -1,9 +1,28 @@
-﻿// Copyright (c) AlphaSierraPapa for the SharpDevelop Team (for details please see \doc\copyright.txt)
-// This code is distributed under MIT X11 license (for details please see \doc\license.txt)
+﻿// Copyright (c) AlphaSierraPapa for the SharpDevelop Team
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 
 using System;
 using System.Linq;
+using System.Threading;
+
+using ICSharpCode.NRefactory.CSharp.Resolver;
 using ICSharpCode.NRefactory.TypeSystem;
+using ICSharpCode.NRefactory.TypeSystem.Implementation;
 using NUnit.Framework;
 
 namespace ICSharpCode.NRefactory.CSharp.Analysis
@@ -11,6 +30,12 @@ namespace ICSharpCode.NRefactory.CSharp.Analysis
 	[TestFixture]
 	public class DefiniteAssignmentTests
 	{
+		DefiniteAssignmentAnalysis CreateDefiniteAssignmentAnalysis(Statement rootStatement)
+		{
+			var resolver = new CSharpAstResolver(new CSharpResolver(new SimpleCompilation(CecilLoaderTests.Mscorlib)), rootStatement);
+			return new DefiniteAssignmentAnalysis(rootStatement, resolver, CancellationToken.None);
+		}
+		
 		[Test]
 		public void TryFinally()
 		{
@@ -40,7 +65,7 @@ namespace ICSharpCode.NRefactory.CSharp.Analysis
 			Statement stmt5 = tryCatchStatement.FinallyBlock.Statements.Single();
 			LabelStatement label = (LabelStatement)block.Statements.ElementAt(1);
 			
-			DefiniteAssignmentAnalysis da = new DefiniteAssignmentAnalysis(block, CecilLoaderTests.Mscorlib);
+			DefiniteAssignmentAnalysis da = CreateDefiniteAssignmentAnalysis(block);
 			da.Analyze("i");
 			Assert.AreEqual(0, da.UnassignedVariableUses.Count);
 			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusBefore(tryCatchStatement));
@@ -90,7 +115,7 @@ namespace ICSharpCode.NRefactory.CSharp.Analysis
 				TrueStatement = new BlockStatement(),
 				FalseStatement = new BlockStatement()
 			};
-			DefiniteAssignmentAnalysis da = new DefiniteAssignmentAnalysis(ifStmt, CecilLoaderTests.Mscorlib);
+			DefiniteAssignmentAnalysis da = CreateDefiniteAssignmentAnalysis(ifStmt);
 			da.Analyze("i");
 			Assert.AreEqual(0, da.UnassignedVariableUses.Count);
 			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusBefore(ifStmt));
@@ -121,7 +146,7 @@ namespace ICSharpCode.NRefactory.CSharp.Analysis
 				TrueStatement = new BlockStatement(),
 				FalseStatement = new BlockStatement()
 			};
-			DefiniteAssignmentAnalysis da = new DefiniteAssignmentAnalysis(ifStmt, CecilLoaderTests.Mscorlib);
+			DefiniteAssignmentAnalysis da = CreateDefiniteAssignmentAnalysis(ifStmt);
 			da.Analyze("i");
 			Assert.AreEqual(0, da.UnassignedVariableUses.Count);
 			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusBefore(ifStmt));
@@ -140,7 +165,7 @@ namespace ICSharpCode.NRefactory.CSharp.Analysis
 					new BreakStatement()
 				}
 			};
-			DefiniteAssignmentAnalysis da = new DefiniteAssignmentAnalysis(loop, CecilLoaderTests.Mscorlib);
+			DefiniteAssignmentAnalysis da = CreateDefiniteAssignmentAnalysis(loop);
 			da.Analyze("i");
 			Assert.AreEqual(0, da.UnassignedVariableUses.Count);
 			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusBefore(loop));
@@ -172,7 +197,7 @@ namespace ICSharpCode.NRefactory.CSharp.Analysis
 					new AssignmentExpression(new IdentifierExpression("j"), new IdentifierExpression("i"))
 				)};
 			
-			DefiniteAssignmentAnalysis da = new DefiniteAssignmentAnalysis(loop, CecilLoaderTests.Mscorlib);
+			DefiniteAssignmentAnalysis da = CreateDefiniteAssignmentAnalysis(loop);
 			da.Analyze("i");
 			Assert.AreEqual(0, da.UnassignedVariableUses.Count);
 			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusBefore(loop));
@@ -196,6 +221,73 @@ namespace ICSharpCode.NRefactory.CSharp.Analysis
 			Assert.AreEqual(DefiniteAssignmentStatus.DefinitelyAssigned, da.GetStatusBefore(loop.Iterators.Single()));
 			Assert.AreEqual(DefiniteAssignmentStatus.DefinitelyAssigned, da.GetStatusAfter(loop.Iterators.Single()));
 			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusAfter(loop));
+		}
+		
+		[Test]
+		public void SwitchWithGotoDefault()
+		{
+			SwitchStatement @switch = new SwitchStatement {
+				SwitchSections = {
+					new SwitchSection { // case 0:
+						CaseLabels = { new CaseLabel(new PrimitiveExpression(0)) },
+						Statements = { new GotoDefaultStatement() }
+					},
+					new SwitchSection { // default:
+						CaseLabels = { new CaseLabel() },
+						Statements = {
+							new ExpressionStatement(new AssignmentExpression(new IdentifierExpression("a"), new PrimitiveExpression(1))),
+							new BreakStatement()
+						}
+					}
+				}};
+			
+			SwitchSection case0 = @switch.SwitchSections.ElementAt(0);
+			SwitchSection defaultSection = @switch.SwitchSections.ElementAt(1);
+			
+			DefiniteAssignmentAnalysis da = CreateDefiniteAssignmentAnalysis(@switch);
+			da.Analyze("a");
+			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusBefore(@switch));
+			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusBefore(case0.Statements.First()));
+			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusBefore(defaultSection.Statements.First()));
+			Assert.AreEqual(DefiniteAssignmentStatus.DefinitelyAssigned, da.GetStatusBefore(defaultSection.Statements.Last()));
+			Assert.AreEqual(DefiniteAssignmentStatus.CodeUnreachable, da.GetStatusAfter(defaultSection.Statements.Last()));
+			Assert.AreEqual(DefiniteAssignmentStatus.DefinitelyAssigned, da.GetStatusAfter(@switch));
+		}
+		
+		[Test]
+		public void SwitchWithGotoCase()
+		{
+			SwitchStatement @switch = new SwitchStatement {
+				Expression = new PrimitiveExpression(1),
+				SwitchSections = {
+					new SwitchSection { // case 0:
+						CaseLabels = { new CaseLabel(new PrimitiveExpression(0)) },
+						Statements = { new BreakStatement() }
+					},
+					new SwitchSection { // case 1:
+						CaseLabels = { new CaseLabel(new PrimitiveExpression(1)) },
+						Statements = {
+							new ExpressionStatement(new AssignmentExpression(new IdentifierExpression("a"), new PrimitiveExpression(0))),
+							new GotoCaseStatement { LabelExpression = new PrimitiveExpression(2) }
+						}
+					},
+					new SwitchSection { // case 2:
+						CaseLabels = { new CaseLabel(new PrimitiveExpression(2)) },
+						Statements = { new BreakStatement() }
+					}
+				}};
+			
+			SwitchSection case0 = @switch.SwitchSections.ElementAt(0);
+			SwitchSection case1 = @switch.SwitchSections.ElementAt(1);
+			SwitchSection case2 = @switch.SwitchSections.ElementAt(2);
+			
+			DefiniteAssignmentAnalysis da = CreateDefiniteAssignmentAnalysis(@switch);
+			da.Analyze("a");
+			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusBefore(@switch));
+			Assert.AreEqual(DefiniteAssignmentStatus.CodeUnreachable, da.GetStatusBefore(case0.Statements.First()));
+			Assert.AreEqual(DefiniteAssignmentStatus.PotentiallyAssigned, da.GetStatusBefore(case1.Statements.First()));
+			Assert.AreEqual(DefiniteAssignmentStatus.DefinitelyAssigned, da.GetStatusBefore(case2.Statements.First()));
+			Assert.AreEqual(DefiniteAssignmentStatus.DefinitelyAssigned, da.GetStatusAfter(@switch));
 		}
 	}
 }

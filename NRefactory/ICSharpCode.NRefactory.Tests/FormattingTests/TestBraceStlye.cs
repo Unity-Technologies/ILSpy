@@ -29,16 +29,15 @@ using System.IO;
 using NUnit.Framework;
 using ICSharpCode.NRefactory.CSharp;
 
-namespace ICSharpCode.NRefactory.FormattingTests
+namespace ICSharpCode.NRefactory.CSharp.FormattingTests
 {
 	[TestFixture()]
 	public class TestBraceStyle : TestBase
 	{
-		[Ignore ("TODO")]
 		[Test()]
 		public void TestNamespaceBraceStyle ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.NamespaceBraceStyle = BraceStyle.EndOfLine;
 			policy.ClassBraceStyle = BraceStyle.DoNotChange;
 			
@@ -65,10 +64,34 @@ namespace B {
 	}");
 		}
 
+
+		[Test()]
+		public void TestAnonymousMethodBraceStyle ()
+		{
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
+			policy.AnonymousMethodBraceStyle = BraceStyle.EndOfLine;
+
+			Test (policy,
+@"class Test
+{
+	void Foo ()
+	{
+		EventHandler handler = delegate(object sender, EventArgs e){};
+	}
+}",
+@"class Test
+{
+	void Foo ()
+	{
+		EventHandler handler = delegate(object sender, EventArgs e) {
+		};
+	}
+}");
+		}
 		[Test()]
 		public void TestClassBraceStlye ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.ClassBraceStyle = BraceStyle.EndOfLine;
 			
 			Test (policy,
@@ -80,7 +103,7 @@ namespace B {
 		[Test()]
 		public void TestStructBraceStyle ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.StructBraceStyle = BraceStyle.NextLine;
 			
 			Test (policy,
@@ -93,7 +116,7 @@ namespace B {
 		[Test()]
 		public void TestInterfaceBraceStyle ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.InterfaceBraceStyle = BraceStyle.NextLine;
 			
 			Test (policy,
@@ -106,7 +129,7 @@ namespace B {
 		[Test()]
 		public void TestEnumBraceStyle ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.EnumBraceStyle = BraceStyle.NextLineShifted;
 			
 			Test (policy, @"enum Test {
@@ -121,7 +144,7 @@ namespace B {
 		[Test()]
 		public void TestMethodBraceStlye ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.MethodBraceStyle = BraceStyle.NextLine;
 			
 			Test (policy, @"class Test
@@ -139,7 +162,7 @@ namespace B {
 		[Test()]
 		public void TestConstructorBraceStyle ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.ConstructorBraceStyle = BraceStyle.NextLine;
 			
 			Test (policy, @"class Test
@@ -157,7 +180,7 @@ namespace B {
 		[Test()]
 		public void TestDestructorBraceStyle ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.DestructorBraceStyle = BraceStyle.NextLine;
 			
 			Test (policy, @"class Test
@@ -175,7 +198,7 @@ namespace B {
 		[Test()]
 		public void TestPropertyBraceStyle ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.PropertyBraceStyle = BraceStyle.NextLine;
 			
 			Test (policy, @"class Test
@@ -198,7 +221,7 @@ namespace B {
 		[Test()]
 		public void TestPropertyGetBraceStyle ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.PropertyGetBraceStyle = BraceStyle.NextLine;
 			
 			Test (policy, @"class Test
@@ -222,12 +245,11 @@ namespace B {
 }");
 		}
 
-		[Ignore ("TODO")]
 		[Test()]
 		public void TestAllowPropertyGetBlockInline ()
 		{
 			
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.PropertyBraceStyle = BraceStyle.DoNotChange;
 			policy.AllowPropertyGetBlockInline = true;
 			policy.AllowPropertySetBlockInline = false;
@@ -264,11 +286,10 @@ namespace B {
 }");
 		}
 
-		[Ignore ("TODO")]
 		[Test()]
 		public void TestAllowPropertySetBlockInline ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.PropertyBraceStyle = BraceStyle.DoNotChange;
 			policy.AllowPropertyGetBlockInline = false;
 			policy.AllowPropertySetBlockInline = true;
@@ -308,7 +329,7 @@ namespace B {
 		[Test()]
 		public void TestPropertySetBraceStyle ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.PropertySetBraceStyle = BraceStyle.NextLine;
 			
 			Test (policy, @"class Test
@@ -335,7 +356,7 @@ namespace B {
 		[Test()]
 		public void TestEventBraceStyle ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.EventBraceStyle = BraceStyle.NextLine;
 			policy.EventAddBraceStyle = BraceStyle.NextLine;
 			policy.EventRemoveBraceStyle = BraceStyle.NextLine;
@@ -366,7 +387,7 @@ namespace B {
 		[Test()]
 		public void TestAllowEventAddBlockInline ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.AllowEventAddBlockInline = true;
 			policy.AllowEventRemoveBlockInline = false;
 			
@@ -391,7 +412,7 @@ namespace B {
 		[Test()]
 		public void TestAllowEventRemoveBlockInline ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.AllowEventAddBlockInline = false;
 			policy.AllowEventRemoveBlockInline = true;
 			
@@ -412,5 +433,34 @@ namespace B {
 	}
 }");
 		}
+		
+		[Test()]
+		public void TestTryCatchWithBannerStyle ()
+		{
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
+			policy.StatementBraceStyle = BraceStyle.BannerStyle;
+			Test (policy, @"class Test
+{
+	void Foo ()
+	{
+					try  {
+			Foo (); } catch (Exception) { } catch (Exception) { } finally { Foo ();}
+	}
+}",
+@"class Test
+{
+	void Foo ()
+	{
+		try {
+			Foo ();
+			} catch (Exception) {
+			} catch (Exception) {
+			} finally {
+			Foo ();
+			}
+	}
+}");
+		}
+
 	}
 }

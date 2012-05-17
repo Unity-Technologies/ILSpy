@@ -1,6 +1,7 @@
 ﻿// Copyright (c) AlphaSierraPapa for the SharpDevelop Team (for details please see \doc\copyright.txt)
 // This code is distributed under the GNU LGPL (for details please see \doc\license.txt)
 using System;
+using System.ComponentModel.Composition;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -27,6 +28,7 @@ using StackFrame = Debugger.StackFrame;
 
 namespace ICSharpCode.ILSpy.Debugger.Services
 {
+	[Export(typeof(IDebugger))]
 	public class WindowsDebugger : IDebugger
 	{
 		enum StopAttachedProcessDialogResult {
@@ -283,10 +285,10 @@ namespace ICSharpCode.ILSpy.Debugger.Services
 			int key = frame.MethodInfo.MetadataToken;
 			
 			// get the mapped instruction from the current line marker or the next one
-			if (!DebugInformation.CodeMappings.ContainsKey(key))
+			if (DebugInformation.CodeMappings == null || !DebugInformation.CodeMappings.ContainsKey(key))
 				return null;
 			
-			return DebugInformation.CodeMappings[key].GetInstructionByTokenAndOffset(key, frame.IP, out isMatch);
+			return DebugInformation.CodeMappings[key].GetInstructionByTokenAndOffset(frame.IP, out isMatch);
 		}
 		
 		StackFrame GetStackFrame()
@@ -299,7 +301,7 @@ namespace ICSharpCode.ILSpy.Debugger.Services
 				frame.ILRanges = new [] { 0, 1 };
 			} else {
 				//var frame = debuggedProcess.SelectedThread.MostRecentStackFrame;
-				frame.SourceCodeLine = map.SourceCodeLine;
+				frame.SourceCodeLine = map.StartLocation.Line;
 				frame.ILRanges = map.ToArray(isMatch);
 			}
 			
@@ -339,8 +341,10 @@ namespace ICSharpCode.ILSpy.Debugger.Services
 				MessageBox.Show(errorCannotStepNoActiveFunction, "StepOver");
 			} else {
 				var frame = GetStackFrame();
-				if (frame != null)
+				if (frame != null) {
 					frame.AsyncStepOver();
+					//Utils.DoEvents(frame.Process);
+				}
 			}
 		}
 		
@@ -442,7 +446,7 @@ namespace ICSharpCode.ILSpy.Debugger.Services
 		/// Gets the tooltip control that shows the value of given variable.
 		/// Return null if no tooltip is available.
 		/// </summary>
-		public object GetTooltipControl(AstLocation logicalPosition, string variableName)
+		public object GetTooltipControl(TextLocation logicalPosition, string variableName)
 		{
 			try {
 				var tooltipExpression = GetExpression(variableName);
@@ -550,7 +554,7 @@ namespace ICSharpCode.ILSpy.Debugger.Services
 				debugger,
 				bookmark.MemberReference.DeclaringType.FullName,
 				bookmark.LineNumber,
-				bookmark.MemberReference.MetadataToken.ToInt32(),
+				bookmark.FunctionToken,
 				bookmark.ILRange.From,
 				bookmark.IsEnabled);
 			
@@ -784,7 +788,9 @@ namespace ICSharpCode.ILSpy.Debugger.Services
 		public void JumpToCurrentLine()
 		{
 			if (debuggedProcess != null &&  debuggedProcess.SelectedThread != null) {
-				
+
+				MainWindow.Instance.Activate();
+
 				// use most recent stack frame because we don't have the symbols
 				var frame = debuggedProcess.SelectedThread.MostRecentStackFrame;
 				
@@ -796,11 +802,12 @@ namespace ICSharpCode.ILSpy.Debugger.Services
 				int line;
 				MemberReference memberReference;
 				
-				if (DebugInformation.CodeMappings.ContainsKey(token) &&
-				    DebugInformation.CodeMappings[token].GetInstructionByTokenAndOffset(token, ilOffset, out memberReference, out line)) {
+				if (DebugInformation.CodeMappings != null && 
+				    DebugInformation.CodeMappings.ContainsKey(token) &&
+				    DebugInformation.CodeMappings[token].GetInstructionByTokenAndOffset(ilOffset, out memberReference, out line)) {
 					DebugInformation.DebugStepInformation = null; // we do not need to step into/out
 					DebuggerService.RemoveCurrentLineMarker();
-					DebuggerService.JumpToCurrentLine(memberReference, line, 0, line, 0);
+					DebuggerService.JumpToCurrentLine(memberReference, line, 0, line, 0, ilOffset);
 				}
 				else {
 					StepIntoUnknownFrame(frame);
@@ -826,6 +833,8 @@ namespace ICSharpCode.ILSpy.Debugger.Services
 				TypeDefinition nestedTypeDef = null;
 				
 				foreach (var assembly in DebugInformation.LoadedAssemblies) {
+					if (null == assembly)
+						continue;
 					if ((assembly.FullName.StartsWith("System") || assembly.FullName.StartsWith("Microsoft") || assembly.FullName.StartsWith("mscorlib")) &&
 					    !assembly.Name.Version.ToString().StartsWith(debuggeeVersion))
 						continue;

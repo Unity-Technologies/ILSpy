@@ -23,7 +23,6 @@ using System.ComponentModel.Composition;
 using System.IO;
 using System.Linq;
 using System.Resources;
-using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
 
@@ -45,7 +44,7 @@ namespace ICSharpCode.ILSpy.VB
 	[Export(typeof(Language))]
 	public class VBLanguage : Language
 	{
-		Predicate<IAstTransform> transformAbortCondition = null;
+		readonly Predicate<IAstTransform> transformAbortCondition = null;
 		bool showAllMembers = false;
 		
 		public VBLanguage()
@@ -85,20 +84,7 @@ namespace ICSharpCode.ILSpy.VB
 					output.WriteReference(mainModule.EntryPoint.DeclaringType.FullName + "." + mainModule.EntryPoint.Name, mainModule.EntryPoint);
 					output.WriteLine();
 				}
-				switch (mainModule.Architecture) {
-					case TargetArchitecture.I386:
-						if ((mainModule.Attributes & ModuleAttributes.Required32Bit) == ModuleAttributes.Required32Bit)
-							WriteCommentLine(output, "Architecture: x86");
-						else
-							WriteCommentLine(output, "Architecture: AnyCPU");
-						break;
-					case TargetArchitecture.AMD64:
-						WriteCommentLine(output, "Architecture: x64");
-						break;
-					case TargetArchitecture.IA64:
-						WriteCommentLine(output, "Architecture: Itanium-64");
-						break;
-				}
+				WriteCommentLine(output, "Architecture: " + CSharpLanguage.GetPlatformDisplayName(mainModule));
 				if ((mainModule.Attributes & ModuleAttributes.ILOnly) == 0) {
 					WriteCommentLine(output, "This assembly contains unmanaged code.");
 				}
@@ -125,7 +111,6 @@ namespace ICSharpCode.ILSpy.VB
 					RunTransformsAndGenerateCode(codeDomBuilder, output, options, assembly.AssemblyDefinition.MainModule);
 				}
 			}
-			OnDecompilationFinished(null);
 		}
 		
 		static readonly string[] projectImports = new[] {
@@ -140,23 +125,7 @@ namespace ICSharpCode.ILSpy.VB
 		void WriteProjectFile(TextWriter writer, IEnumerable<Tuple<string, string>> files, ModuleDefinition module)
 		{
 			const string ns = "http://schemas.microsoft.com/developer/msbuild/2003";
-			string platformName;
-			switch (module.Architecture) {
-				case TargetArchitecture.I386:
-					if ((module.Attributes & ModuleAttributes.Required32Bit) == ModuleAttributes.Required32Bit)
-						platformName = "x86";
-					else
-						platformName = "AnyCPU";
-					break;
-				case TargetArchitecture.AMD64:
-					platformName = "x64";
-					break;
-				case TargetArchitecture.IA64:
-					platformName = "Itanium";
-					break;
-				default:
-					throw new NotSupportedException("Invalid value for TargetArchitecture");
-			}
+			string platformName = CSharpLanguage.GetPlatformName(module);
 			using (XmlTextWriter w = new XmlTextWriter(writer)) {
 				w.Formatting = Formatting.Indented;
 				w.WriteStartDocument();
@@ -237,7 +206,6 @@ namespace ICSharpCode.ILSpy.VB
 					if (r.Name != "mscorlib") {
 						w.WriteStartElement("Reference");
 						w.WriteAttributeString("Include", r.Name);
-						// TODO: RequiredTargetFramework
 						w.WriteEndElement();
 					}
 				}
@@ -315,8 +283,8 @@ namespace ICSharpCode.ILSpy.VB
 		#region WriteResourceFilesInProject
 		IEnumerable<Tuple<string, string>> WriteResourceFilesInProject(LoadedAssembly assembly, DecompilationOptions options, HashSet<string> directories)
 		{
-			AppDomain bamlDecompilerAppDomain = null;
-			try {
+			//AppDomain bamlDecompilerAppDomain = null;
+			//try {
 				foreach (EmbeddedResource r in assembly.AssemblyDefinition.MainModule.Resources.OfType<EmbeddedResource>()) {
 					string fileName;
 					Stream s = r.GetResourceStream();
@@ -367,11 +335,11 @@ namespace ICSharpCode.ILSpy.VB
 					}
 					yield return Tuple.Create("EmbeddedResource", fileName);
 				}
-			}
-			finally {
-				if (bamlDecompilerAppDomain != null)
-					AppDomain.Unload(bamlDecompilerAppDomain);
-			}
+			//}
+			//finally {
+			//    if (bamlDecompilerAppDomain != null)
+			//        AppDomain.Unload(bamlDecompilerAppDomain);
+			//}
 		}
 
 		string GetFileNameForResource(string fullName, HashSet<string> directories)
@@ -439,7 +407,9 @@ namespace ICSharpCode.ILSpy.VB
 			astBuilder.RunTransformations(transformAbortCondition);
 			if (options.DecompilerSettings.ShowXmlDocumentation)
 				AddXmlDocTransform.Run(astBuilder.CompilationUnit);
-			var unit = astBuilder.CompilationUnit.AcceptVisitor(new CSharpToVBConverterVisitor(new ILSpyEnvironmentProvider(CreateResolveContext(module))), null);
+			var csharpUnit = astBuilder.CompilationUnit;
+			csharpUnit.AcceptVisitor(new NRefactory.CSharp.InsertParenthesesVisitor() { InsertParenthesesForReadability = true });
+			var unit = csharpUnit.AcceptVisitor(new CSharpToVBConverterVisitor(new ILSpyEnvironmentProvider()), null);
 			var outputFormatter = new VBTextOutputFormatter(output);
 			var formattingPolicy = new VBFormattingOptions();
 			unit.AcceptVisitor(new OutputVisitor(outputFormatter, formattingPolicy), null);
@@ -481,42 +451,22 @@ namespace ICSharpCode.ILSpy.VB
 			return TypeToString(options, type, typeAttributes);
 		}
 		
-		ITypeResolveContext CreateResolveContext(ModuleDefinition module)
-		{
-			IProjectContent projectContent = new CecilTypeResolveContext(module);
-		
-			List<ITypeResolveContext> resolveContexts = new List<ITypeResolveContext>();
-			resolveContexts.Add(projectContent);
-			foreach (AssemblyNameReference r in module.AssemblyReferences) {
-				AssemblyDefinition d = module.AssemblyResolver.Resolve(r);
-				if (d != null) {
-					resolveContexts.Add(new CecilTypeResolveContext(d.MainModule));
-				}
-			}
-			
-			return new CompositeTypeResolveContext(resolveContexts);
-		}
-		
 		string TypeToString(ConvertTypeOptions options, TypeReference type, ICustomAttributeProvider typeAttributes = null)
 		{
-			
-			var astType = AstBuilder
-				.ConvertType(type, typeAttributes, options)
-				.AcceptVisitor(new CSharpToVBConverterVisitor(new ILSpyEnvironmentProvider(CreateResolveContext(type.Resolve().Module))), null);
+			var envProvider = new ILSpyEnvironmentProvider();
+			var converter = new CSharpToVBConverterVisitor(envProvider);
+			var astType = AstBuilder.ConvertType(type, typeAttributes, options);
 			StringWriter w = new StringWriter();
-			// TODO
-//			if (type.IsByReference) {
-//				ParameterDefinition pd = typeAttributes as ParameterDefinition;
-//				if (pd != null && (!pd.IsIn && pd.IsOut))
-//					w.Write("out ");
-//				else
-//					w.Write("ref ");
-//
-//				if (astType is ComposedType && ((ComposedType)astType).PointerRank > 0)
-//					((ComposedType)astType).PointerRank--;
-//			}
+
+			if (type.IsByReference) {
+				w.Write("ByRef ");
+				if (astType is NRefactory.CSharp.ComposedType && ((NRefactory.CSharp.ComposedType)astType).PointerRank > 0)
+					((NRefactory.CSharp.ComposedType)astType).PointerRank--;
+			}
 			
-			astType.AcceptVisitor(new OutputVisitor(w, new VBFormattingOptions()), null);
+			var vbAstType = astType.AcceptVisitor(converter, null);
+			
+			vbAstType.AcceptVisitor(new OutputVisitor(w, new VBFormattingOptions()), null);
 			return w.ToString();
 		}
 	}

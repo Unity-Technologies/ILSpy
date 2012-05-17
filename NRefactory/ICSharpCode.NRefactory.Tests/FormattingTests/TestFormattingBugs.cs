@@ -29,9 +29,8 @@ using System.IO;
 using NUnit.Framework;
 using ICSharpCode.NRefactory.CSharp;
 
-namespace ICSharpCode.NRefactory.FormattingTests
+namespace ICSharpCode.NRefactory.CSharp.FormattingTests
 {
-	[Ignore()]
 	[TestFixture()]
 	public class TestFormattingBugs : TestBase
 	{
@@ -41,7 +40,7 @@ namespace ICSharpCode.NRefactory.FormattingTests
 		[Test()]
 		public void TestBug325187 ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.PlaceElseOnNewLine = true;
 			
 			TestStatementFormatting (policy,
@@ -63,7 +62,7 @@ Console.WriteLine (""Bad indent"");",
 		[Test()]
 		public void TestBug415469 ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			
 			TestStatementFormatting (policy,
 @"switch (condition) {
@@ -87,7 +86,7 @@ case CONDITION2:
 		[Test()]
 		public void TestBug540043 ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			
 			TestStatementFormatting (policy,
 @"using (IDisposable a = null)
@@ -106,7 +105,7 @@ using (IDisposable b = null) {
 		[Test()]
 		public void TestBug655635 ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			
 			TestStatementFormatting (policy,
 @"try {
@@ -131,10 +130,12 @@ using (IDisposable b = null) {
 		" + input + @"
 	}
 }");
-			int start = result.GetLineOffset (5);
-			int end = result.GetLineOffset (result.LineCount - 1);
-			string text = result.GetTextAt (start, end - start).Trim ();
-			expectedOutput = expectedOutput.Replace ("\n", "\n\t\t");
+			int start = result.GetOffset (5, 1);
+			int end = result.GetOffset (result.LineCount - 1, 1);
+			string text = result.GetText (start, end - start).Trim ();
+			expectedOutput = NormalizeNewlines(expectedOutput).Replace ("\n", "\n\t\t");
+			if (expectedOutput != text)
+				Console.WriteLine (text);
 			Assert.AreEqual (expectedOutput, text);
 		}
 
@@ -144,7 +145,7 @@ using (IDisposable b = null) {
 		[Test()]
 		public void TestBug659675 ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			TestStatementFormatting (policy, "@string=@int;", "@string = @int;");
 		}
 		
@@ -154,7 +155,7 @@ using (IDisposable b = null) {
 		[Test()]
 		public void TestBug670213 ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.MethodBraceStyle = BraceStyle.EndOfLine;
 			
 			Test (policy, @"class Test
@@ -177,7 +178,7 @@ using (IDisposable b = null) {
 		[Test()]
 		public void TestBug677261 ()
 		{
-			CSharpFormattingOptions policy = new CSharpFormattingOptions ();
+			CSharpFormattingOptions policy = FormattingOptionsFactory.CreateMono ();
 			policy.ConstructorBraceStyle = BraceStyle.EndOfLine;
 			
 			Test (policy, @"class Test
@@ -189,6 +190,40 @@ using (IDisposable b = null) {
 @"class Test
 {
 	Test () {
+	}
+}");
+		}
+		
+		/// <summary>
+		/// Bug 3586 -Format code is removing try { code blocks
+		/// </summary>
+		[Test()]
+		public void TestBug3586 ()
+		{
+			var policy = FormattingOptionsFactory.CreateMono ();
+			policy.ConstructorBraceStyle = BraceStyle.EndOfLine;
+			
+			Test (policy, @"public class A
+{
+	public object GetValue ()
+        {
+            try
+            {
+foo ();
+            }
+            catch
+            {
+            }
+        }
+}",
+@"public class A
+{
+	public object GetValue ()
+	{
+		try {
+			foo ();
+		} catch {
+		}
 	}
 }");
 		}

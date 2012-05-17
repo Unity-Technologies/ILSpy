@@ -6,6 +6,7 @@ using System.Windows.Media;
 using ICSharpCode.ILSpy.AvalonEdit;
 using ICSharpCode.ILSpy.Bookmarks;
 using ICSharpCode.ILSpy.SharpDevelop;
+using ICSharpCode.NRefactory;
 using ICSharpCode.NRefactory.CSharp;
 using Mono.Cecil;
 
@@ -24,7 +25,7 @@ namespace ICSharpCode.ILSpy.Debugger.Bookmarks
 		static int endLine;
 		static int endColumn;
 		
-		public static void SetPosition(MemberReference memberReference, int makerStartLine, int makerStartColumn, int makerEndLine, int makerEndColumn)
+		public static void SetPosition(MemberReference memberReference, int makerStartLine, int makerStartColumn, int makerEndLine, int makerEndColumn, int ilOffset)
 		{
 			Remove();
 			
@@ -33,7 +34,7 @@ namespace ICSharpCode.ILSpy.Debugger.Bookmarks
 			endLine     = makerEndLine;
 			endColumn   = makerEndColumn;
 			
-			instance = new CurrentLineBookmark(memberReference, new AstLocation(startLine, startColumn));
+			instance = new CurrentLineBookmark(memberReference, new TextLocation(startLine, startColumn), ilOffset);
 			BookmarkManager.AddMark(instance);
 		}
 		
@@ -53,10 +54,12 @@ namespace ICSharpCode.ILSpy.Debugger.Bookmarks
 			get { return 100; }
 		}
 		
-		public CurrentLineBookmark(MemberReference member, AstLocation location) : base(member, location)
+		private CurrentLineBookmark(MemberReference member, TextLocation location, int ilOffset) : base(member, location)
 		{
-			
+			this.ILOffset = ilOffset;
 		}
+		
+		public int ILOffset { get; private set; }
 		
 		public override ImageSource Image {
 			get { return Images.CurrentLine; }
@@ -81,8 +84,8 @@ namespace ICSharpCode.ILSpy.Debugger.Bookmarks
 			ITextMarker marker = markerService.Create(offset + startColumn - 1, length + 1);
 			marker.BackgroundColor = Colors.Yellow;
 			marker.ForegroundColor = Colors.Blue;
-			marker.IsVisible = b => b is MarkerBookmark && DebugInformation.DecompiledMemberReferences != null &&
-				DebugInformation.DecompiledMemberReferences.ContainsKey(((MarkerBookmark)b).MemberReference.MetadataToken.ToInt32());
+			marker.IsVisible = b => b is MarkerBookmark && DebugInformation.CodeMappings != null &&
+				DebugInformation.CodeMappings.ContainsKey(((MarkerBookmark)b).MemberReference.MetadataToken.ToInt32());
 			marker.Bookmark = this;
 			this.Marker = marker;
 			return marker;

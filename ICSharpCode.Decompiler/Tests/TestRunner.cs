@@ -34,6 +34,12 @@ namespace ICSharpCode.Decompiler.Tests
 	[TestFixture]
 	public class TestRunner
 	{
+		[Test]
+		public void Async()
+		{
+			TestFile(@"..\..\Tests\Async.cs");
+		}
+		
 		[Test, Ignore("disambiguating overloads is not yet implemented")]
 		public void CallOverloadedMethod()
 		{
@@ -52,10 +58,16 @@ namespace ICSharpCode.Decompiler.Tests
 			TestFile(@"..\..\Tests\DelegateConstruction.cs");
 		}
 		
+		[Test, Ignore("Not yet implemented")]
+		public void ExpressionTrees()
+		{
+			TestFile(@"..\..\Tests\ExpressionTrees.cs");
+		}
+		
 		[Test]
 		public void ExceptionHandling()
 		{
-			TestFile(@"..\..\Tests\ExceptionHandling.cs");
+			TestFile(@"..\..\Tests\ExceptionHandling.cs", optimize: false);
 		}
 		
 		[Test]
@@ -71,6 +83,12 @@ namespace ICSharpCode.Decompiler.Tests
 		}
 		
 		[Test]
+		public void ControlFlowWithDebug()
+		{
+			TestFile(@"..\..\Tests\ControlFlow.cs", optimize: false, useDebug: true);
+		}
+		
+		[Test]
 		public void IncrementDecrement()
 		{
 			TestFile(@"..\..\Tests\IncrementDecrement.cs");
@@ -80,6 +98,12 @@ namespace ICSharpCode.Decompiler.Tests
 		public void InitializerTests()
 		{
 			TestFile(@"..\..\Tests\InitializerTests.cs");
+		}
+
+		[Test]
+		public void LiftedOperators()
+		{
+			TestFile(@"..\..\Tests\LiftedOperators.cs");
 		}
 		
 		[Test]
@@ -106,7 +130,7 @@ namespace ICSharpCode.Decompiler.Tests
 			TestFile(@"..\..\Tests\PropertiesAndEvents.cs");
 		}
 		
-		[Test, Ignore("Formatting differences in anonymous method create expressions")]
+		[Test]
 		public void QueryExpressions()
 		{
 			TestFile(@"..\..\Tests\QueryExpressions.cs");
@@ -148,10 +172,16 @@ namespace ICSharpCode.Decompiler.Tests
 			TestFile(@"..\..\Tests\TypeAnalysisTests.cs");
 		}
 		
-		static void TestFile(string fileName)
+		static void TestFile(string fileName, bool useDebug = false)
+		{
+			TestFile(fileName, false, useDebug);
+			TestFile(fileName, true, useDebug);
+		}
+
+		static void TestFile(string fileName, bool optimize, bool useDebug = false)
 		{
 			string code = File.ReadAllText(fileName);
-			AssemblyDefinition assembly = Compile(code);
+			AssemblyDefinition assembly = Compile(code, optimize, useDebug);
 			AstBuilder decompiler = new AstBuilder(new DecompilerContext(assembly.MainModule));
 			decompiler.AddAssembly(assembly);
 			new Helpers.RemoveCompilerAttribute().Run(decompiler.CompilationUnit);
@@ -160,11 +190,11 @@ namespace ICSharpCode.Decompiler.Tests
 			CodeAssert.AreEqual(code, output.ToString());
 		}
 
-		static AssemblyDefinition Compile(string code)
+		static AssemblyDefinition Compile(string code, bool optimize, bool useDebug)
 		{
 			CSharpCodeProvider provider = new CSharpCodeProvider(new Dictionary<string, string> { { "CompilerVersion", "v4.0" } });
 			CompilerParameters options = new CompilerParameters();
-			options.CompilerOptions = "/unsafe /o-";
+			options.CompilerOptions = "/unsafe /o" + (optimize ? "+" : "-") + (useDebug ? " /debug": "");
 			options.ReferencedAssemblies.Add("System.Core.dll");
 			CompilerResults results = provider.CompileAssemblyFromSource(options, code);
 			try {

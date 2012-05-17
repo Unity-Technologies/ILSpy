@@ -183,7 +183,7 @@ namespace ICSharpCode.ILSpy.TreeNodes
 		/// Looks up the method node corresponding to the method definition.
 		/// Returns null if no matching node is found.
 		/// </summary>
-		public SharpTreeNode FindMethodNode(MethodDefinition def)
+		public ILSpyTreeNode FindMethodNode(MethodDefinition def)
 		{
 			if (def == null)
 				return null;
@@ -203,8 +203,8 @@ namespace ICSharpCode.ILSpy.TreeNodes
 					p.EnsureLazyChildren();
 					methodNode = p.Children.OfType<MethodTreeNode>().FirstOrDefault(m => m.MethodDefinition == def);
 					if (methodNode != null) {
-						/// If the requested method is a property or event accessor, and accessors are
-						/// hidden in the UI, then return the owning property or event.
+						// If the requested method is a property or event accessor, and accessors are
+						// hidden in the UI, then return the owning property or event.
 						if (methodNode.IsHidden)
 							return p;
 						else

@@ -35,6 +35,7 @@ namespace ICSharpCode.Decompiler.ILAst
 		InlineVariables,
 		CopyPropagation,
 		YieldReturn,
+		AsyncAwait,
 		PropertyAccessInstructions,
 		SplitToMovableBlocks,
 		TypeInference,
@@ -42,15 +43,18 @@ namespace ICSharpCode.Decompiler.ILAst
 		SimplifyTernaryOperator,
 		SimplifyNullCoalescing,
 		JoinBasicBlocks,
+		SimplifyLogicNot,
 		SimplifyShiftOperators,
-		TransformDecimalCtorToConstant,
+		TypeConversionSimplifications,
 		SimplifyLdObjAndStObj,
 		SimplifyCustomShortCircuit,
+		SimplifyLiftedOperators,
 		TransformArrayInitializers,
 		TransformMultidimensionalArrayInitializers,
 		TransformObjectInitializers,
 		MakeAssignmentExpression,
 		IntroducePostIncrement,
+		InlineExpressionTreeParameterDeclarations,
 		InlineVariables2,
 		FindLoops,
 		FindConditions,
@@ -104,6 +108,10 @@ namespace ICSharpCode.Decompiler.ILAst
 			
 			if (abortBeforeStep == ILAstOptimizationStep.YieldReturn) return;
 			YieldReturnDecompiler.Run(context, method);
+			AsyncDecompiler.RunStep1(context, method);
+			
+			if (abortBeforeStep == ILAstOptimizationStep.AsyncAwait) return;
+			AsyncDecompiler.RunStep2(context, method);
 			
 			if (abortBeforeStep == ILAstOptimizationStep.PropertyAccessInstructions) return;
 			IntroducePropertyAccessInstructions(method);
@@ -134,18 +142,23 @@ namespace ICSharpCode.Decompiler.ILAst
 					if (abortBeforeStep == ILAstOptimizationStep.JoinBasicBlocks) return;
 					modified |= block.RunOptimization(new SimpleControlFlow(context, method).JoinBasicBlocks);
 
+					if (abortBeforeStep == ILAstOptimizationStep.SimplifyLogicNot) return;
+					modified |= block.RunOptimization(SimplifyLogicNot);
+
 					if (abortBeforeStep == ILAstOptimizationStep.SimplifyShiftOperators) return;
 					modified |= block.RunOptimization(SimplifyShiftOperators);
 
-					if (abortBeforeStep == ILAstOptimizationStep.TransformDecimalCtorToConstant) return;
-					modified |= block.RunOptimization(TransformDecimalCtorToConstant);
-					modified |= block.RunOptimization(SimplifyLdcI4ConvI8);
+					if (abortBeforeStep == ILAstOptimizationStep.TypeConversionSimplifications) return;
+					modified |= block.RunOptimization(TypeConversionSimplifications);
 					
 					if (abortBeforeStep == ILAstOptimizationStep.SimplifyLdObjAndStObj) return;
 					modified |= block.RunOptimization(SimplifyLdObjAndStObj);
 					
 					if (abortBeforeStep == ILAstOptimizationStep.SimplifyCustomShortCircuit) return;
 					modified |= block.RunOptimization(new SimpleControlFlow(context, method).SimplifyCustomShortCircuit);
+
+					if (abortBeforeStep == ILAstOptimizationStep.SimplifyLiftedOperators) return;
+					modified |= block.RunOptimization(SimplifyLiftedOperators);
 					
 					if (abortBeforeStep == ILAstOptimizationStep.TransformArrayInitializers) return;
 					modified |= block.RunOptimization(TransformArrayInitializers);
@@ -162,6 +175,11 @@ namespace ICSharpCode.Decompiler.ILAst
 					
 					if (abortBeforeStep == ILAstOptimizationStep.IntroducePostIncrement) return;
 					modified |= block.RunOptimization(IntroducePostIncrement);
+					
+					if (abortBeforeStep == ILAstOptimizationStep.InlineExpressionTreeParameterDeclarations) return;
+					if (context.Settings.ExpressionTrees) {
+						modified |= block.RunOptimization(InlineExpressionTreeParameterDeclarations);
+					}
 					
 					if (abortBeforeStep == ILAstOptimizationStep.InlineVariables2) return;
 					modified |= new ILInlining(method).InlineAllInBlock(block);
@@ -243,7 +261,7 @@ namespace ICSharpCode.Decompiler.ILAst
 		/// Ignore arguments of 'leave'
 		/// </summary>
 		/// <param name="method"></param>
-		void RemoveRedundantCode(ILBlock method)
+		internal static void RemoveRedundantCode(ILBlock method)
 		{
 			Dictionary<ILLabel, int> labelRefCount = new Dictionary<ILLabel, int>();
 			foreach (ILLabel target in method.GetSelfAndChildrenRecursive<ILExpression>(e => e.IsBranch()).SelectMany(e => e.GetBranchTargets())) {
@@ -273,7 +291,13 @@ namespace ICSharpCode.Decompiler.ILAst
 							prevExpr.ILRanges.AddRange(((ILExpression)body[i]).ILRanges);
 						// Ignore pop
 					} else {
-						newBody.Add(body[i]);
+						ILLabel label = body[i] as ILLabel;
+						if (label != null) {
+							if (labelRefCount.GetOrDefault(label) > 0)
+								newBody.Add(label);
+						} else {
+							newBody.Add(body[i]);
+						}
 					}
 				}
 				block.Body = newBody;
@@ -307,27 +331,30 @@ namespace ICSharpCode.Decompiler.ILAst
 			for (int i = 0; i < block.Body.Count; i++) {
 				ILExpression expr = block.Body[i] as ILExpression;
 				if (expr != null && expr.Prefixes == null) {
+					ILCode op;
 					switch(expr.Code) {
 						case ILCode.Switch:
 						case ILCode.Brtrue:
 							expr.Arguments.Single().ILRanges.AddRange(expr.ILRanges);
 							expr.ILRanges.Clear();
 							continue;
-							case ILCode.__Brfalse:  block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.LogicNot, null, expr.Arguments.Single())); break;
-							case ILCode.__Beq:      block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.Ceq, null, expr.Arguments)); break;
-							case ILCode.__Bne_Un:   block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.LogicNot, null, new ILExpression(ILCode.Ceq, null, expr.Arguments))); break;
-							case ILCode.__Bgt:      block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.Cgt, null, expr.Arguments)); break;
-							case ILCode.__Bgt_Un:   block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.Cgt_Un, null, expr.Arguments)); break;
-							case ILCode.__Ble:      block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.LogicNot, null, new ILExpression(ILCode.Cgt, null, expr.Arguments))); break;
-							case ILCode.__Ble_Un:   block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.LogicNot, null, new ILExpression(ILCode.Cgt_Un, null, expr.Arguments))); break;
-							case ILCode.__Blt:      block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.Clt, null, expr.Arguments)); break;
-							case ILCode.__Blt_Un:   block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.Clt_Un, null, expr.Arguments)); break;
-							case ILCode.__Bge:	    block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.LogicNot, null, new ILExpression(ILCode.Clt, null, expr.Arguments))); break;
-							case ILCode.__Bge_Un:   block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, new ILExpression(ILCode.LogicNot, null, new ILExpression(ILCode.Clt_Un, null, expr.Arguments))); break;
+							case ILCode.__Brfalse:  op = ILCode.LogicNot; break;
+							case ILCode.__Beq:      op = ILCode.Ceq; break;
+							case ILCode.__Bne_Un:   op = ILCode.Cne; break;
+							case ILCode.__Bgt:      op = ILCode.Cgt; break;
+							case ILCode.__Bgt_Un:   op = ILCode.Cgt_Un; break;
+							case ILCode.__Ble:      op = ILCode.Cle; break;
+							case ILCode.__Ble_Un:   op = ILCode.Cle_Un; break;
+							case ILCode.__Blt:      op = ILCode.Clt; break;
+							case ILCode.__Blt_Un:   op = ILCode.Clt_Un; break;
+							case ILCode.__Bge:	    op = ILCode.Cge; break;
+							case ILCode.__Bge_Un:   op = ILCode.Cge_Un; break;
 						default:
 							continue;
 					}
-					((ILExpression)block.Body[i]).Arguments.Single().ILRanges.AddRange(expr.ILRanges);
+					var newExpr = new ILExpression(op, null, expr.Arguments);
+					block.Body[i] = new ILExpression(ILCode.Brtrue, expr.Operand, newExpr);
+					newExpr.ILRanges = expr.ILRanges;
 				}
 			}
 		}
@@ -721,6 +748,7 @@ namespace ICSharpCode.Decompiler.ILAst
 				case ILCode.Ldc_I8:
 				case ILCode.Ldc_R4:
 				case ILCode.Ldc_R8:
+				case ILCode.Ldc_Decimal:
 					return true;
 				default:
 					return false;
@@ -833,6 +861,17 @@ namespace ICSharpCode.Decompiler.ILAst
 		{
 			if (!collection.Remove(key))
 				throw new Exception("The key was not found in the dictionary");
+		}
+		
+		public static bool ContainsReferenceTo(this ILExpression expr, ILVariable v)
+		{
+			if (expr.Operand == v)
+				return true;
+			foreach (var arg in expr.Arguments) {
+				if (ContainsReferenceTo(arg, v))
+					return true;
+			}
+			return false;
 		}
 	}
 }

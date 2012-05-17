@@ -280,15 +280,9 @@ namespace ICSharpCode.Decompiler.ILAst
 					if (forceInferChildren) {
 						InferTypeForExpression(expr.Arguments[0], typeSystem.Boolean);
 					}
-					return TypeWithMoreInformation(
-						InferTypeForExpression(expr.Arguments[1], expectedType, forceInferChildren),
-						InferTypeForExpression(expr.Arguments[2], expectedType, forceInferChildren)
-					);
+					return InferBinaryArguments(expr.Arguments[1], expr.Arguments[2], expectedType, forceInferChildren);
 				case ILCode.NullCoalescing:
-					return TypeWithMoreInformation(
-						InferTypeForExpression(expr.Arguments[0], expectedType, forceInferChildren),
-						InferTypeForExpression(expr.Arguments[1], expectedType, forceInferChildren)
-					);
+					return InferBinaryArguments(expr.Arguments[0], expr.Arguments[1], expectedType, forceInferChildren);
 					#endregion
 					#region Variable load/store
 				case ILCode.Stloc:
@@ -472,7 +466,7 @@ namespace ICSharpCode.Decompiler.ILAst
 					if (forceInferChildren) {
 						InferTypeForExpression(expr.Arguments[0], typeSystem.TypedReference);
 					}
-					return new TypeReference("System", "RuntimeTypeHandle", module, module, true);
+					return new TypeReference("System", "RuntimeTypeHandle", module, module.TypeSystem.Corlib, true);
 				case ILCode.Refanyval:
 					if (forceInferChildren) {
 						InferTypeForExpression(expr.Arguments[0], typeSystem.TypedReference);
@@ -483,6 +477,10 @@ namespace ICSharpCode.Decompiler.ILAst
 						TypeReference t = InferTypeForExpression(expr.Arguments[0], UnpackPointer(expectedType));
 						return t != null ? new ByReferenceType(t) : null;
 					}
+				case ILCode.ValueOf:
+					return GetNullableTypeArgument(InferTypeForExpression(expr.Arguments[0], CreateNullableType(expectedType)));
+				case ILCode.NullableOf:
+					return CreateNullableType(InferTypeForExpression(expr.Arguments[0], GetNullableTypeArgument(expectedType)));
 					#endregion
 					#region Arithmetic instructions
 				case ILCode.Not: // bitwise complement
@@ -557,7 +555,9 @@ namespace ICSharpCode.Decompiler.ILAst
 					}
 				case ILCode.CompoundAssignment:
 					{
-						TypeReference varType = InferTypeForExpression(expr.Arguments[0].Arguments[0], null);
+						var op = expr.Arguments[0];
+						if (op.Code == ILCode.NullableOf) op = op.Arguments[0].Arguments[0];
+						var varType = InferTypeForExpression(op.Arguments[0], null);
 						if (forceInferChildren) {
 							InferTypeForExpression(expr.Arguments[0], varType);
 						}
@@ -593,21 +593,32 @@ namespace ICSharpCode.Decompiler.ILAst
 				case ILCode.Ldc_R8:
 					return typeSystem.Double;
 				case ILCode.Ldc_Decimal:
-					return new TypeReference("System", "Decimal", module, module, true);
+					return new TypeReference("System", "Decimal", module, module.TypeSystem.Corlib, true);
 				case ILCode.Ldtoken:
 					if (expr.Operand is TypeReference)
-						return new TypeReference("System", "RuntimeTypeHandle", module, module, true);
+						return new TypeReference("System", "RuntimeTypeHandle", module, module.TypeSystem.Corlib, true);
 					else if (expr.Operand is FieldReference)
-						return new TypeReference("System", "RuntimeFieldHandle", module, module, true);
+						return new TypeReference("System", "RuntimeFieldHandle", module, module.TypeSystem.Corlib, true);
 					else
-						return new TypeReference("System", "RuntimeMethodHandle", module, module, true);
+						return new TypeReference("System", "RuntimeMethodHandle", module, module.TypeSystem.Corlib, true);
 				case ILCode.Arglist:
-					return new TypeReference("System", "RuntimeArgumentHandle", module, module, true);
+					return new TypeReference("System", "RuntimeArgumentHandle", module, module.TypeSystem.Corlib, true);
 					#endregion
 					#region Array instructions
 				case ILCode.Newarr:
-					if (forceInferChildren)
-						InferTypeForExpression(expr.Arguments.Single(), typeSystem.Int32);
+					if (forceInferChildren) {
+						var lengthType = InferTypeForExpression(expr.Arguments.Single(), null);
+						if (lengthType == typeSystem.IntPtr) {
+							lengthType = typeSystem.Int64;
+						} else if (lengthType == typeSystem.UIntPtr) {
+							lengthType = typeSystem.UInt64;
+						} else if (lengthType != typeSystem.UInt32 && lengthType != typeSystem.Int64 && lengthType != typeSystem.UInt64) {
+							lengthType = typeSystem.Int32;
+						}
+						if (forceInferChildren) {
+							InferTypeForExpression(expr.Arguments.Single(), lengthType);
+						}
+					}
 					return new ArrayType((TypeReference)expr.Operand);
 				case ILCode.InitArray:
 					var operandAsArrayType = (ArrayType)expr.Operand;
@@ -735,22 +746,30 @@ namespace ICSharpCode.Decompiler.ILAst
 						return tr.IsValueType ? typeSystem.Object : tr;
 					}
 				case ILCode.Box:
-					if (forceInferChildren)
-						InferTypeForExpression(expr.Arguments.Single(), (TypeReference)expr.Operand);
-					return (TypeReference)expr.Operand;
+					{
+						var tr = (TypeReference)expr.Operand;
+						if (forceInferChildren)
+							InferTypeForExpression(expr.Arguments.Single(), tr);
+						return tr.IsValueType ? typeSystem.Object : tr;
+					}
 					#endregion
 					#region Comparison instructions
 				case ILCode.Ceq:
+				case ILCode.Cne:
 					if (forceInferChildren)
 						InferArgumentsInBinaryOperator(expr, null, null);
 					return typeSystem.Boolean;
 				case ILCode.Clt:
 				case ILCode.Cgt:
+				case ILCode.Cle:
+				case ILCode.Cge:
 					if (forceInferChildren)
 						InferArgumentsInBinaryOperator(expr, true, null);
 					return typeSystem.Boolean;
 				case ILCode.Clt_Un:
 				case ILCode.Cgt_Un:
+				case ILCode.Cle_Un:
+				case ILCode.Cge_Un:
 					if (forceInferChildren)
 						InferArgumentsInBinaryOperator(expr, false, null);
 					return typeSystem.Boolean;
@@ -771,8 +790,17 @@ namespace ICSharpCode.Decompiler.ILAst
 				case ILCode.YieldBreak:
 					return null;
 				case ILCode.Ret:
-					if (forceInferChildren && expr.Arguments.Count == 1)
-						InferTypeForExpression(expr.Arguments[0], context.CurrentMethod.ReturnType);
+					if (forceInferChildren && expr.Arguments.Count == 1) {
+						TypeReference returnType = context.CurrentMethod.ReturnType;
+						if (context.CurrentMethodIsAsync && returnType != null && returnType.Namespace == "System.Threading.Tasks") {
+							if (returnType.Name == "Task") {
+								returnType = typeSystem.Void;
+							} else if (returnType.Name == "Task`1" && returnType.IsGenericInstance) {
+								returnType = ((GenericInstanceType)returnType).GenericArguments[0];
+							}
+						}
+						InferTypeForExpression(expr.Arguments[0], returnType);
+					}
 					return null;
 				case ILCode.YieldReturn:
 					if (forceInferChildren) {
@@ -784,11 +812,23 @@ namespace ICSharpCode.Decompiler.ILAst
 						}
 					}
 					return null;
+				case ILCode.Await:
+					{
+						TypeReference taskType = InferTypeForExpression(expr.Arguments[0], null);
+						if (taskType.Name == "Task`1" && taskType.IsGenericInstance && taskType.Namespace == "System.Threading.Tasks") {
+							return ((GenericInstanceType)taskType).GenericArguments[0];
+						}
+						return null;
+					}
 					#endregion
 				case ILCode.Pop:
 					return null;
+				case ILCode.Wrap:
 				case ILCode.Dup:
-					return InferTypeForExpression(expr.Arguments.Single(), expectedType);
+					{
+						var arg = expr.Arguments.Single();
+						return arg.ExpectedType = InferTypeForExpression(arg, expectedType);
+					}
 				default:
 					Debug.WriteLine("Type Inference: Can't handle " + expr.Code.GetName());
 					return null;
@@ -904,14 +944,12 @@ namespace ICSharpCode.Decompiler.ILAst
 			}
 			GenericParameter gp = type as GenericParameter;
 			if (gp != null) {
-				if (gp.Owner.GenericParameterType == GenericParameterType.Method) {
+				if (member.DeclaringType is ArrayType) {
+					return ((ArrayType)member.DeclaringType).ElementType;
+				} else if (gp.Owner.GenericParameterType == GenericParameterType.Method) {
 					return ((GenericInstanceMethod)member).GenericArguments[gp.Position];
-				} else {
-					if (member.DeclaringType is ArrayType) {
-						return ((ArrayType)member.DeclaringType).ElementType;
-					} else {
-						return ((GenericInstanceType)member.DeclaringType).GenericArguments[gp.Position];
-					}
+				} else  {
+					return ((GenericInstanceType)member.DeclaringType).GenericArguments[gp.Position];
 				}
 			}
 			return type;
@@ -934,25 +972,24 @@ namespace ICSharpCode.Decompiler.ILAst
 				type = ((TypeSpecification)type).ElementType;
 			return type;
 		}
+
+		static TypeReference GetNullableTypeArgument(TypeReference type)
+		{
+			var t = type as GenericInstanceType;
+			return IsNullableType(t) ? t.GenericArguments[0] : type;
+		}
+
+		GenericInstanceType CreateNullableType(TypeReference type)
+		{
+			if (type == null) return null;
+			var t = new GenericInstanceType(new TypeReference("System", "Nullable`1", module, module.TypeSystem.Corlib, true));
+			t.GenericArguments.Add(type);
+			return t;
+		}
 		
 		TypeReference InferArgumentsInBinaryOperator(ILExpression expr, bool? isSigned, TypeReference expectedType)
 		{
-			ILExpression left = expr.Arguments[0];
-			ILExpression right = expr.Arguments[1];
-			TypeReference leftPreferred = DoInferTypeForExpression(left, expectedType);
-			TypeReference rightPreferred = DoInferTypeForExpression(right, expectedType);
-			if (IsSameType(leftPreferred, rightPreferred)) {
-				return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = leftPreferred;
-			} else if (IsSameType(rightPreferred, DoInferTypeForExpression(left, rightPreferred))) {
-				return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = rightPreferred;
-			} else if (IsSameType(leftPreferred, DoInferTypeForExpression(right, leftPreferred))) {
-				return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = leftPreferred;
-			} else {
-				left.ExpectedType = right.ExpectedType = TypeWithMoreInformation(leftPreferred, rightPreferred);
-				left.InferredType = DoInferTypeForExpression(left, left.ExpectedType);
-				right.InferredType = DoInferTypeForExpression(right, right.ExpectedType);
-				return left.ExpectedType;
-			}
+			return InferBinaryArguments(expr.Arguments[0], expr.Arguments[1], expectedType);
 		}
 		
 		TypeReference InferArgumentsInAddition(ILExpression expr, bool? isSigned, TypeReference expectedType)
@@ -964,25 +1001,26 @@ namespace ICSharpCode.Decompiler.ILAst
 				left.InferredType = left.ExpectedType = leftPreferred;
 				InferTypeForExpression(right, typeSystem.IntPtr);
 				return leftPreferred;
-			} else {
-				TypeReference rightPreferred = DoInferTypeForExpression(right, expectedType);
-				if (rightPreferred is PointerType) {
-					InferTypeForExpression(left, typeSystem.IntPtr);
-					right.InferredType = right.ExpectedType = rightPreferred;
-					return rightPreferred;
-				} else if (IsSameType(leftPreferred, rightPreferred)) {
-					return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = leftPreferred;
-				} else if (IsSameType(rightPreferred, DoInferTypeForExpression(left, rightPreferred))) {
-					return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = rightPreferred;
-				} else if (IsSameType(leftPreferred, DoInferTypeForExpression(right, leftPreferred))) {
-					return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = leftPreferred;
-				} else {
-					left.ExpectedType = right.ExpectedType = TypeWithMoreInformation(leftPreferred, rightPreferred);
-					left.InferredType = DoInferTypeForExpression(left, left.ExpectedType);
-					right.InferredType = DoInferTypeForExpression(right, right.ExpectedType);
-					return left.ExpectedType;
-				}
 			}
+			if (IsEnum(leftPreferred)) {
+				//E+U=E
+				left.InferredType = left.ExpectedType = leftPreferred;
+				InferTypeForExpression(right, GetEnumUnderlyingType(leftPreferred));
+				return leftPreferred;
+			}
+			TypeReference rightPreferred = DoInferTypeForExpression(right, expectedType);
+			if (rightPreferred is PointerType) {
+				InferTypeForExpression(left, typeSystem.IntPtr);
+				right.InferredType = right.ExpectedType = rightPreferred;
+				return rightPreferred;
+			}
+			if (IsEnum(rightPreferred)) {
+				//U+E=E
+				right.InferredType = right.ExpectedType = rightPreferred;
+				InferTypeForExpression(left, GetEnumUnderlyingType(rightPreferred));
+				return rightPreferred;
+			}
+			return InferBinaryArguments(left, right, expectedType, leftPreferred: leftPreferred, rightPreferred: rightPreferred);
 		}
 		
 		TypeReference InferArgumentsInSubtraction(ILExpression expr, bool? isSigned, TypeReference expectedType)
@@ -994,20 +1032,40 @@ namespace ICSharpCode.Decompiler.ILAst
 				left.InferredType = left.ExpectedType = leftPreferred;
 				InferTypeForExpression(right, typeSystem.IntPtr);
 				return leftPreferred;
-			} else {
-				TypeReference rightPreferred = DoInferTypeForExpression(right, expectedType);
-				if (IsSameType(leftPreferred, rightPreferred)) {
-					return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = leftPreferred;
-				} else if (IsSameType(rightPreferred, DoInferTypeForExpression(left, rightPreferred))) {
-					return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = rightPreferred;
-				} else if (IsSameType(leftPreferred, DoInferTypeForExpression(right, leftPreferred))) {
-					return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = leftPreferred;
+			}
+			if (IsEnum(leftPreferred)) {
+				if (expectedType != null && IsEnum(expectedType)) {
+					// E-U=E
+					left.InferredType = left.ExpectedType = leftPreferred;
+					InferTypeForExpression(right, GetEnumUnderlyingType(leftPreferred));
+					return leftPreferred;
 				} else {
-					left.ExpectedType = right.ExpectedType = TypeWithMoreInformation(leftPreferred, rightPreferred);
-					left.InferredType = DoInferTypeForExpression(left, left.ExpectedType);
-					right.InferredType = DoInferTypeForExpression(right, right.ExpectedType);
-					return left.ExpectedType;
+					// E-E=U
+					left.InferredType = left.ExpectedType = leftPreferred;
+					InferTypeForExpression(right, leftPreferred);
+					return GetEnumUnderlyingType(leftPreferred);
 				}
+			}
+			return InferBinaryArguments(left, right, expectedType, leftPreferred: leftPreferred);
+		}
+
+		TypeReference InferBinaryArguments(ILExpression left, ILExpression right, TypeReference expectedType, bool forceInferChildren = false, TypeReference leftPreferred = null, TypeReference rightPreferred = null)
+		{
+			if (leftPreferred == null) leftPreferred = DoInferTypeForExpression(left, expectedType, forceInferChildren);
+			if (rightPreferred == null) rightPreferred = DoInferTypeForExpression(right, expectedType, forceInferChildren);
+			if (IsSameType(leftPreferred, rightPreferred)) {
+				return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = leftPreferred;
+			} else if (IsSameType(rightPreferred, DoInferTypeForExpression(left, rightPreferred, forceInferChildren))) {
+				return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = rightPreferred;
+			} else if (IsSameType(leftPreferred, DoInferTypeForExpression(right, leftPreferred, forceInferChildren))) {
+				// re-infer the left expression with the preferred type to reset any conflicts caused by the rightPreferred type
+				DoInferTypeForExpression(left, leftPreferred, forceInferChildren);
+				return left.InferredType = right.InferredType = left.ExpectedType = right.ExpectedType = leftPreferred;
+			} else {
+				left.ExpectedType = right.ExpectedType = TypeWithMoreInformation(leftPreferred, rightPreferred);
+				left.InferredType = DoInferTypeForExpression(left, left.ExpectedType, forceInferChildren);
+				right.InferredType = DoInferTypeForExpression(right, right.ExpectedType, forceInferChildren);
+				return left.ExpectedType;
 			}
 		}
 		
@@ -1030,18 +1088,28 @@ namespace ICSharpCode.Decompiler.ILAst
 		/// </summary>
 		public const int NativeInt = 33; // treat native int as between int32 and int64
 		
-		public static int GetInformationAmount(TypeReference type)
+		/// <summary>
+		/// Gets the underlying type, if the specified type is an enum.
+		/// Otherwise, returns null.
+		/// </summary>
+		public static TypeReference GetEnumUnderlyingType(TypeReference enumType)
 		{
-			if (type == null)
-				return 0;
-			if (type.IsValueType && !IsArrayPointerOrReference(type)) {
+			// unfortunately we cannot rely on enumType.IsValueType here - it's not set when the instruction operand is a typeref (as opposed to a typespec)
+			if (enumType != null && !IsArrayPointerOrReference(enumType)) {
 				// value type might be an enum
-				TypeDefinition typeDef = type.Resolve() as TypeDefinition;
+				TypeDefinition typeDef = enumType.Resolve() as TypeDefinition;
 				if (typeDef != null && typeDef.IsEnum) {
-					TypeReference underlyingType = typeDef.Fields.Single(f => f.IsRuntimeSpecialName && !f.IsStatic).FieldType;
-					return GetInformationAmount(underlyingType);
+					return typeDef.Fields.Single(f => !f.IsStatic).FieldType;
 				}
 			}
+			return null;
+		}
+		
+		public static int GetInformationAmount(TypeReference type)
+		{
+			type = GetEnumUnderlyingType(type) ?? type;
+			if (type == null)
+				return 0;
 			switch (type.MetadataType) {
 				case MetadataType.Void:
 					return 0;
@@ -1093,14 +1161,9 @@ namespace ICSharpCode.Decompiler.ILAst
 		
 		static bool? IsSigned(TypeReference type)
 		{
-			if (type == null || IsArrayPointerOrReference(type))
+			type = GetEnumUnderlyingType(type) ?? type;
+			if (type == null)
 				return null;
-			// unfortunately we cannot rely on type.IsValueType here - it's not set when the instruction operand is a typeref (as opposed to a typespec)
-			TypeDefinition typeDef = type.Resolve() as TypeDefinition;
-			if (typeDef != null && typeDef.IsEnum) {
-				TypeReference underlyingType = typeDef.Fields.Single(f => f.IsRuntimeSpecialName && !f.IsStatic).FieldType;
-				return IsSigned(underlyingType);
-			}
 			switch (type.MetadataType) {
 				case MetadataType.SByte:
 				case MetadataType.Int16:
@@ -1122,10 +1185,7 @@ namespace ICSharpCode.Decompiler.ILAst
 		
 		static bool OperandFitsInType(TypeReference type, int num)
 		{
-			TypeDefinition typeDef = type.Resolve() as TypeDefinition;
-			if (typeDef != null && typeDef.IsEnum) {
-				type = typeDef.Fields.Single(f => f.IsRuntimeSpecialName && !f.IsStatic).FieldType;
-			}
+			type = GetEnumUnderlyingType(type) ?? type;
 			switch (type.MetadataType) {
 				case MetadataType.SByte:
 					return sbyte.MinValue <= num && num <= sbyte.MaxValue;
@@ -1151,6 +1211,11 @@ namespace ICSharpCode.Decompiler.ILAst
 				typeSpec = typeSpec.ElementType as TypeSpecification;
 			}
 			return false;
+		}
+
+		internal static bool IsNullableType(TypeReference type)
+		{
+			return type != null && type.Name == "Nullable`1" && type.Namespace == "System";
 		}
 		
 		public static TypeCode GetTypeCode(TypeReference type)

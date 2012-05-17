@@ -106,4 +106,48 @@ public class TypeAnalysisTests
 	{
 		return (int)num ^ (int)(num >> 32);
 	}
+
+	public void TernaryOp(Random a, Random b, bool c)
+	{
+		if ((c ? a : b) == null)
+		{
+			Console.WriteLine();
+		}
+	}
+
+	public void OperatorIs(object o)
+	{
+		Console.WriteLine(o is Random);
+		Console.WriteLine(!(o is Random));
+	}
+	
+	public byte[] CreateArrayWithInt(int length)
+	{
+		return new byte[length];
+	}
+	
+	public byte[] CreateArrayWithLong(long length)
+	{
+		return new byte[length];
+	}
+	
+	public byte[] CreateArrayWithUInt(uint length)
+	{
+		return new byte[length];
+	}
+	
+	public byte[] CreateArrayWithULong(ulong length)
+	{
+		return new byte[length];
+	}
+	
+	public StringComparison EnumDiffNumber(StringComparison data)
+	{
+		return data - 1;
+	}
+	
+	public int EnumDiff(StringComparison a, StringComparison b)
+	{
+		return Math.Abs(a - b);
+	}
 }

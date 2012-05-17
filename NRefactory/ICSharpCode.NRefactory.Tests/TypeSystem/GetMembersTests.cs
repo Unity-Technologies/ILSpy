@@ -1,7 +1,23 @@
-﻿// Copyright (c) 2010 AlphaSierraPapa for the SharpDevelop Team (for details please see \doc\copyright.txt)
-// This code is distributed under MIT X11 license (for details please see \doc\license.txt)
+﻿// Copyright (c) AlphaSierraPapa for the SharpDevelop Team
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using ICSharpCode.NRefactory.TypeSystem.Implementation;
 using NUnit.Framework;
@@ -11,65 +27,78 @@ namespace ICSharpCode.NRefactory.TypeSystem
 	[TestFixture]
 	public class GetMembersTests
 	{
-		IProjectContent mscorlib = CecilLoaderTests.Mscorlib;
-		
 		[Test]
 		public void EmptyClassHasToString()
 		{
-			DefaultTypeDefinition c = new DefaultTypeDefinition(mscorlib, string.Empty, "C");
-			Assert.AreEqual("System.Object.ToString", c.GetMethods(mscorlib, m => m.Name == "ToString").Single().FullName);
+			DefaultUnresolvedTypeDefinition c = new DefaultUnresolvedTypeDefinition(string.Empty, "C");
+			var compilation = TypeSystemHelper.CreateCompilation(c);
+			Assert.AreEqual("System.Object.ToString", compilation.MainAssembly.GetTypeDefinition(c).GetMethods(m => m.Name == "ToString").Single().FullName);
 		}
 		
 		[Test]
 		public void MultipleInheritanceTest()
 		{
-			DefaultTypeDefinition b1 = new DefaultTypeDefinition(mscorlib, string.Empty, "B1");
-			b1.ClassType = ClassType.Interface;
-			b1.Properties.Add(new DefaultProperty(b1, "P1"));
+			DefaultUnresolvedTypeDefinition b1 = new DefaultUnresolvedTypeDefinition(string.Empty, "B1");
+			b1.Kind = TypeKind.Interface;
+			b1.Members.Add(new DefaultUnresolvedProperty(b1, "P1"));
 			
-			DefaultTypeDefinition b2 = new DefaultTypeDefinition(mscorlib, string.Empty, "B1");
-			b2.ClassType = ClassType.Interface;
-			b2.Properties.Add(new DefaultProperty(b1, "P2"));
+			DefaultUnresolvedTypeDefinition b2 = new DefaultUnresolvedTypeDefinition(string.Empty, "B2");
+			b2.Kind = TypeKind.Interface;
+			b2.Members.Add(new DefaultUnresolvedProperty(b2, "P2"));
 			
-			DefaultTypeDefinition c = new DefaultTypeDefinition(mscorlib, string.Empty, "C");
-			c.ClassType = ClassType.Interface;
+			DefaultUnresolvedTypeDefinition c = new DefaultUnresolvedTypeDefinition(string.Empty, "C");
+			c.Kind = TypeKind.Interface;
 			c.BaseTypes.Add(b1);
 			c.BaseTypes.Add(b2);
 			
-			Assert.AreEqual(new[] { "P1", "P2" }, c.GetProperties(mscorlib).Select(p => p.Name).ToArray());
+			var compilation = TypeSystemHelper.CreateCompilation(b1, b2, c);
+			ITypeDefinition resolvedC = compilation.MainAssembly.GetTypeDefinition(c);
+			Assert.AreEqual(new[] { "P1", "P2" }, resolvedC.GetProperties().Select(p => p.Name).ToArray());
 			// Test that there's only one copy of ToString():
-			Assert.AreEqual(1, c.GetMethods(mscorlib, m => m.Name == "ToString").Count());
+			Assert.AreEqual(1, resolvedC.GetMethods(m => m.Name == "ToString").Count());
 		}
 		
 		[Test]
-		public void ArrayType()
+		public void GetNestedTypesOfUnboundGenericClass()
 		{
-			IType arrayType = typeof(string[]).ToTypeReference().Resolve(mscorlib);
-			// Array inherits ToString() from System.Object
-			Assert.AreEqual("System.Object.ToString", arrayType.GetMethods(mscorlib, m => m.Name == "ToString").Single().FullName);
-			Assert.AreEqual("System.Array.GetLowerBound", arrayType.GetMethods(mscorlib, m => m.Name == "GetLowerBound").Single().FullName);
-			Assert.AreEqual("System.Array.Length", arrayType.GetProperties(mscorlib, p => p.Name == "Length").Single().FullName);
-			
-			// test indexer
-			IProperty indexer = arrayType.GetProperties(mscorlib, p => p.IsIndexer).Single();
-			Assert.AreEqual("System.Array.Items", indexer.FullName);
-			Assert.AreEqual("System.String", indexer.ReturnType.Resolve(mscorlib).ReflectionName);
-			Assert.AreEqual(1, indexer.Parameters.Count);
-			Assert.AreEqual("System.Int32", indexer.Parameters[0].Type.Resolve(mscorlib).ReflectionName);
+			var compilation = TypeSystemHelper.CreateCompilation();
+			ITypeDefinition dictionary = compilation.FindType(typeof(Dictionary<,>)).GetDefinition();
+			IType keyCollection = dictionary.GetNestedTypes().Single(t => t.Name == "KeyCollection");
+			// the type should be parameterized
+			Assert.AreEqual("System.Collections.Generic.Dictionary`2+KeyCollection[[`0],[`1]]", keyCollection.ReflectionName);
 		}
 		
 		[Test]
-		public void MultidimensionalArrayType()
+		public void GetNestedTypesOfBoundGenericClass()
 		{
-			IType arrayType = typeof(string[,][]).ToTypeReference().Resolve(mscorlib);
+			var compilation = TypeSystemHelper.CreateCompilation();
+			IType dictionary = compilation.FindType(typeof(Dictionary<string, int>));
+			IType keyCollection = dictionary.GetNestedTypes().Single(t => t.Name == "KeyCollection");
+			Assert.AreEqual(compilation.FindType(typeof(Dictionary<string, int>.KeyCollection)), keyCollection);
+		}
+		
+		[Test]
+		public void GetGenericNestedTypeOfBoundGenericClass()
+		{
+			// class A<X> { class B<Y> { } }
+			DefaultUnresolvedTypeDefinition a = new DefaultUnresolvedTypeDefinition(string.Empty, "A");
+			a.TypeParameters.Add(new DefaultUnresolvedTypeParameter(EntityType.TypeDefinition, 0, "X"));
 			
-			// test indexer
-			IProperty indexer = arrayType.GetProperties(mscorlib, p => p.IsIndexer).Single();
-			Assert.AreEqual("System.Array.Items", indexer.FullName);
-			Assert.AreEqual("System.String[]", indexer.ReturnType.Resolve(mscorlib).ReflectionName);
-			Assert.AreEqual(2, indexer.Parameters.Count);
-			Assert.AreEqual("System.Int32", indexer.Parameters[0].Type.Resolve(mscorlib).ReflectionName);
-			Assert.AreEqual("System.Int32", indexer.Parameters[1].Type.Resolve(mscorlib).ReflectionName);
+			DefaultUnresolvedTypeDefinition b = new DefaultUnresolvedTypeDefinition(a, "B");
+			b.TypeParameters.Add(a.TypeParameters[0]);
+			b.TypeParameters.Add(new DefaultUnresolvedTypeParameter(EntityType.TypeDefinition, 1, "Y"));
+			
+			a.NestedTypes.Add(b);
+			
+			var compilation = TypeSystemHelper.CreateCompilation(a, b);
+			ITypeDefinition resolvedA = compilation.MainAssembly.GetTypeDefinition(a);
+			ITypeDefinition resolvedB = compilation.MainAssembly.GetTypeDefinition(b);
+			
+			// A<> gets self-parameterized, B<> stays unbound
+			Assert.AreEqual("A`1+B`1[[`0],[]]", resolvedA.GetNestedTypes().Single().ReflectionName);
+			
+			ParameterizedType pt = new ParameterizedType(resolvedA, new [] { compilation.FindType(KnownTypeCode.String) });
+			Assert.AreEqual("A`1+B`1[[System.String],[]]", pt.GetNestedTypes().Single().ReflectionName);
 		}
 	}
 }

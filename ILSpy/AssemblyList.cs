@@ -17,7 +17,6 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -26,8 +25,6 @@ using System.IO;
 using System.Linq;
 using System.Windows.Threading;
 using System.Xml.Linq;
-using ICSharpCode.ILSpy.TreeNodes;
-using Mono.Cecil;
 
 namespace ICSharpCode.ILSpy
 {
@@ -42,6 +39,7 @@ namespace ICSharpCode.ILSpy
 		bool dirty;
 		
 		internal readonly ConcurrentDictionary<string, LoadedAssembly> assemblyLookupCache = new ConcurrentDictionary<string, LoadedAssembly>();
+		internal readonly ConcurrentDictionary<string, LoadedAssembly> winRTMetadataLookupCache = new ConcurrentDictionary<string, LoadedAssembly>();
 		
 		/// <summary>
 		/// The assemblies in this list.
@@ -103,7 +101,7 @@ namespace ICSharpCode.ILSpy
 		
 		void Assemblies_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
 		{
-			assemblyLookupCache.Clear();
+			ClearCache();
 			// Whenever the assembly list is modified, mark it as dirty
 			// and enqueue a task that saves it once the UI has finished modifying the assembly list.
 			if (!dirty) {
@@ -114,10 +112,16 @@ namespace ICSharpCode.ILSpy
 						delegate {
 							dirty = false;
 							AssemblyListManager.SaveList(this);
-							assemblyLookupCache.Clear();
+							ClearCache();
 						})
 				);
 			}
+		}
+		
+		internal void ClearCache()
+		{
+			assemblyLookupCache.Clear();
+			winRTMetadataLookupCache.Clear();
 		}
 		
 		/// <summary>

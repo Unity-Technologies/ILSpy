@@ -48,22 +48,50 @@ namespace ILSpy.BamlDecompiler
 			string assemblyName = name.Substring(comma + 1).Trim();
 			
 			var type = thisAssembly.MainModule.GetType(fullName);
+			
 			if (type == null) {
-				var otherAssembly = resolver.Resolve(assemblyName);
-				if (otherAssembly == null)
-					throw new Exception("could not resolve '" + assemblyName + "'!");
-				type = otherAssembly.MainModule.GetType(fullName.Replace('+', '/'));
+				type = TryFindInExportedTypes(fullName, thisAssembly);
 			}
 			
+			if (type == null) {
+				var otherAssembly = resolver.Resolve(AssemblyNameReference.Parse(assemblyName));
+				if (otherAssembly == null)
+					return new UnresolvableType(name);
+				type = otherAssembly.MainModule.GetType(fullName.Replace('+', '/'));
+				
+				if (type == null) {
+					type = TryFindInExportedTypes(fullName, otherAssembly);
+				}
+			}
+			
+			if (type == null)
+				return new UnresolvableType(name);
+			
 			return new CecilType(type);
+		}
+
+		TypeDefinition TryFindInExportedTypes(string fullName, AssemblyDefinition asm)
+		{
+			foreach (var exportedType in asm.MainModule.ExportedTypes) {
+				if (exportedType.IsForwarder && exportedType.FullName == fullName) {
+					return exportedType.Resolve();
+				}
+			}
+			
+			return null;
 		}
 		
 		public IDependencyPropertyDescriptor GetDependencyPropertyDescriptor(string name, IType ownerType, IType targetType)
 		{
-			if (!(ownerType is CecilType))
-				throw new ArgumentException();
+			if (ownerType == null)
+				throw new ArgumentNullException("ownerType");
 			
-			return new CecilDependencyPropertyDescriptor(name, ((CecilType)ownerType).type);
+			if (ownerType is CecilType)
+				return new CecilDependencyPropertyDescriptor(name, ((CecilType)ownerType).type);
+			if (ownerType is UnresolvableType)
+				return new UnresolvableDependencyPropertyDescriptor();
+			
+			throw new ArgumentException("Invalid IType: " + ownerType.GetType());
 		}
 		
 		public string RuntimeVersion {

@@ -129,7 +129,7 @@ namespace ICSharpCode.ILSpy.TreeNodes
 			}
 		}
 
-		FilterSettings StripSearchTerm(FilterSettings filterSettings)
+		static FilterSettings StripSearchTerm(FilterSettings filterSettings)
 		{
 			if (filterSettings == null)
 				return null;
@@ -164,6 +164,19 @@ namespace ICSharpCode.ILSpy.TreeNodes
 				childrenNeedFiltering = false;
 				foreach (ILSpyTreeNode node in this.Children.OfType<ILSpyTreeNode>())
 					ApplyFilterToChild(node);
+			}
+		}
+		
+		public virtual bool IsPublicAPI {
+			get { return true; }
+		}
+		
+		public override System.Windows.Media.Brush Foreground {
+			get {
+				if (IsPublicAPI)
+					return base.Foreground;
+				else
+					return System.Windows.SystemColors.GrayTextBrush;
 			}
 		}
 	}

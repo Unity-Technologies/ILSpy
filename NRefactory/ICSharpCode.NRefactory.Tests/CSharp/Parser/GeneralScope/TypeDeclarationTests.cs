@@ -1,5 +1,20 @@
-﻿// Copyright (c) AlphaSierraPapa for the SharpDevelop Team (for details please see \doc\copyright.txt)
-// This code is distributed under MIT X11 license (for details please see \doc\license.txt)
+// Copyright (c) AlphaSierraPapa for the SharpDevelop Team
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 
 using System;
 using System.Linq;
@@ -29,7 +44,7 @@ namespace ICSharpCode.NRefactory.CSharp.Parser.GeneralScope
 			TypeDeclaration td = ParseUtilCSharp.ParseGlobal<TypeDeclaration>(program);
 			Assert.AreEqual(1, td.StartLocation.Line, "StartLocation.Y");
 			Assert.AreEqual(1, td.StartLocation.Column, "StartLocation.X");
-			AstLocation bodyStartLocation = td.GetChildByRole(AstNode.Roles.LBrace).PrevSibling.EndLocation;
+			TextLocation bodyStartLocation = td.GetChildByRole(Roles.LBrace).PrevSibling.EndLocation;
 			Assert.AreEqual(1, bodyStartLocation.Line, "BodyStartLocation.Y");
 			Assert.AreEqual(14, bodyStartLocation.Column, "BodyStartLocation.X");
 			Assert.AreEqual(3, td.EndLocation.Line, "EndLocation.Y");
@@ -75,8 +90,8 @@ namespace ICSharpCode.NRefactory.CSharp.Parser.GeneralScope
 			ParseUtilCSharp.AssertGlobal(
 				"public class G<T> {}",
 				new TypeDeclaration {
-					Modifiers = Modifiers.Public,
 					ClassType = ClassType.Class,
+					Modifiers = Modifiers.Public,
 					Name = "G",
 					TypeParameters = { new TypeParameterDeclaration { Name = "T" } }
 				});
@@ -88,26 +103,26 @@ namespace ICSharpCode.NRefactory.CSharp.Parser.GeneralScope
 			ParseUtilCSharp.AssertGlobal(
 				@"public class Test<T> where T : IMyInterface { }",
 				new TypeDeclaration {
-					Modifiers = Modifiers.Public,
 					ClassType = ClassType.Class,
+					Modifiers = Modifiers.Public,
 					Name = "Test",
 					TypeParameters = { new TypeParameterDeclaration { Name = "T" } },
 					Constraints = {
 						new Constraint {
-							TypeParameter = "T",
+							TypeParameter = new SimpleType ("T"),
 							BaseTypes = { new SimpleType("IMyInterface") }
 						}
 					}});
 		}
 		
-		[Test, Ignore ("Mono parser bug.")]
-		public void ComplexGenericClassTypeDeclarationTest()
+		[Test]
+		public void ComplexGenericInterfaceTypeDeclarationTest()
 		{
 			ParseUtilCSharp.AssertGlobal(
-				"public class Generic<in T, out S> : System.IComparable where S : G<T[]>, new() where  T : MyNamespace.IMyInterface",
+				"public interface Generic<in T, out S> : System.IComparable where S : G<T[]>, new() where  T : MyNamespace.IMyInterface {}",
 				new TypeDeclaration {
+					ClassType = ClassType.Interface,
 					Modifiers = Modifiers.Public,
-					ClassType = ClassType.Class,
 					Name = "Generic",
 					TypeParameters = {
 						new TypeParameterDeclaration { Variance = VarianceModifier.Contravariant, Name = "T" },
@@ -121,7 +136,7 @@ namespace ICSharpCode.NRefactory.CSharp.Parser.GeneralScope
 					},
 					Constraints = {
 						new Constraint {
-							TypeParameter = "S",
+							TypeParameter = new SimpleType ("S"),
 							BaseTypes = {
 								new SimpleType {
 									Identifier = "G",
@@ -131,7 +146,7 @@ namespace ICSharpCode.NRefactory.CSharp.Parser.GeneralScope
 							}
 						},
 						new Constraint {
-							TypeParameter = "T",
+							TypeParameter = new SimpleType ("T"),
 							BaseTypes = {
 								new MemberType {
 									Target = new SimpleType("MyNamespace"),
@@ -153,6 +168,7 @@ public abstract class MyClass : MyBase, Interface1, My.Test.Interface2
 {
 }",
 				new TypeDeclaration {
+					ClassType = ClassType.Class,
 					Attributes = {
 						new AttributeSection {
 							Attributes = {
@@ -161,7 +177,6 @@ public abstract class MyClass : MyBase, Interface1, My.Test.Interface2
 						}
 					},
 					Modifiers = Modifiers.Public | Modifiers.Abstract,
-					ClassType = ClassType.Class,
 					Name = "MyClass",
 					BaseTypes = {
 						new SimpleType("MyBase"),
@@ -209,8 +224,8 @@ public abstract class MyClass : MyBase, Interface1, My.Test.Interface2
 			ParseUtilCSharp.AssertGlobal(
 				"partial class partial<[partial: where] where> where where : partial<where> { }",
 				new TypeDeclaration {
-					Modifiers = Modifiers.Partial,
 					ClassType = ClassType.Class,
+					Modifiers = Modifiers.Partial,
 					Name = "partial",
 					TypeParameters = {
 						new TypeParameterDeclaration {
@@ -225,7 +240,7 @@ public abstract class MyClass : MyBase, Interface1, My.Test.Interface2
 					},
 					Constraints = {
 						new Constraint {
-							TypeParameter = "where",
+							TypeParameter = new SimpleType ("where"),
 							BaseTypes = {
 								new SimpleType {
 									Identifier = "partial",
@@ -287,6 +302,68 @@ public abstract class MyClass : MyBase, Interface1, My.Test.Interface2
 			TypeDeclaration td = ParseUtilCSharp.ParseGlobal<TypeDeclaration>("enum MyEnum : short { }");
 			Assert.AreEqual("MyEnum", td.Name);
 			Assert.AreEqual("short", ((PrimitiveType)td.BaseTypes.Single()).Keyword);
+		}
+		
+		[Test, Ignore("Mono parser crash")]
+		public void EnumWithIncorrectNewlineAfterIntegerLiteral ()
+		{
+			ParseUtilCSharp.AssertGlobal (
+				"enum DisplayFlags { D = 4\r\r\n}",
+				new TypeDeclaration {
+					ClassType = ClassType.Enum,
+					Name = "DisplayFlags",
+					Members = {
+						new EnumMemberDeclaration {
+							Name = "D",
+							Initializer = new PrimitiveExpression(4)
+						}
+					}});
+		}
+		
+		[Test]
+		public void EnumWithCommaAtEnd()
+		{
+			TypeDeclaration td = ParseUtilCSharp.ParseGlobal<TypeDeclaration>("enum MyEnum { A, }");
+			Assert.AreEqual(
+				new Role[] {
+					Roles.EnumKeyword,
+					Roles.Identifier,
+					Roles.LBrace,
+					Roles.TypeMemberRole,
+					Roles.Comma,
+					Roles.RBrace
+				}, td.Children.Select(c => c.Role).ToArray());
+		}
+		
+		[Test]
+		public void EnumWithCommaAndSemicolonAtEnd()
+		{
+			TypeDeclaration td = ParseUtilCSharp.ParseGlobal<TypeDeclaration>("enum MyEnum { A, };");
+			Assert.AreEqual(
+				new Role[] {
+					Roles.EnumKeyword,
+					Roles.Identifier,
+					Roles.LBrace,
+					Roles.TypeMemberRole,
+					Roles.Comma,
+					Roles.RBrace,
+					Roles.Semicolon
+				}, td.Children.Select(c => c.Role).ToArray());
+		}
+		
+		[Test, Ignore("Parser bug (incorrectly creates a comma at the end of the enum)")]
+		public void EnumWithSemicolonAtEnd()
+		{
+			TypeDeclaration td = ParseUtilCSharp.ParseGlobal<TypeDeclaration>("enum MyEnum { A };");
+			Assert.AreEqual(
+				new Role[] {
+					Roles.EnumKeyword,
+					Roles.Identifier,
+					Roles.LBrace,
+					Roles.TypeMemberRole,
+					Roles.RBrace,
+					Roles.Semicolon
+				}, td.Children.Select(c => c.Role).ToArray());
 		}
 	}
 }

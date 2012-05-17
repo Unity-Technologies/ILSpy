@@ -17,14 +17,7 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
 using System.Xml.Linq;
 using ICSharpCode.Decompiler;
 
@@ -60,6 +53,7 @@ namespace ICSharpCode.ILSpy.Options
 			DecompilerSettings s = new DecompilerSettings();
 			s.AnonymousMethods = (bool?)e.Attribute("anonymousMethods") ?? s.AnonymousMethods;
 			s.YieldReturn = (bool?)e.Attribute("yieldReturn") ?? s.YieldReturn;
+			s.AsyncAwait = (bool?)e.Attribute("asyncAwait") ?? s.AsyncAwait;
 			s.QueryExpressions = (bool?)e.Attribute("queryExpressions") ?? s.QueryExpressions;
 			s.UseDebugSymbols = (bool?)e.Attribute("useDebugSymbols") ?? s.UseDebugSymbols;
 			s.ShowXmlDocumentation = (bool?)e.Attribute("xmlDoc") ?? s.ShowXmlDocumentation;
@@ -72,6 +66,7 @@ namespace ICSharpCode.ILSpy.Options
 			XElement section = new XElement("DecompilerSettings");
 			section.SetAttributeValue("anonymousMethods", s.AnonymousMethods);
 			section.SetAttributeValue("yieldReturn", s.YieldReturn);
+			section.SetAttributeValue("asyncAwait", s.AsyncAwait);
 			section.SetAttributeValue("queryExpressions", s.QueryExpressions);
 			section.SetAttributeValue("useDebugSymbols", s.UseDebugSymbols);
 			section.SetAttributeValue("xmlDoc", s.ShowXmlDocumentation);

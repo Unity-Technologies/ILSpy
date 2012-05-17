@@ -1,11 +1,29 @@
-﻿// Copyright (c) AlphaSierraPapa for the SharpDevelop Team (for details please see \doc\copyright.txt)
-// This code is distributed under MIT X11 license (for details please see \doc\license.txt)
+﻿// Copyright (c) AlphaSierraPapa for the SharpDevelop Team
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using ICSharpCode.NRefactory.CSharp.TypeSystem;
+using ICSharpCode.NRefactory.Semantics;
 using ICSharpCode.NRefactory.TypeSystem;
+using ICSharpCode.NRefactory.TypeSystem.Implementation;
 using NUnit.Framework;
 
 namespace ICSharpCode.NRefactory.CSharp.Resolver
@@ -13,12 +31,39 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 	[TestFixture]
 	public class NameLookupTests : ResolverTestBase
 	{
+		CSharpResolver resolver;
+		
+		public override void SetUp()
+		{
+			base.SetUp();
+			resolver = new CSharpResolver(compilation).WithCurrentUsingScope(MakeUsingScope(string.Empty));
+		}
+		
+		ResolvedUsingScope MakeUsingScope(string namespaceName = "", string[] usings = null, KeyValuePair<string, string>[] usingAliases = null)
+		{
+			UsingScope usingScope = new UsingScope();
+			if (!string.IsNullOrEmpty(namespaceName)) {
+				foreach (string element in namespaceName.Split('.')) {
+					usingScope = new UsingScope(usingScope, string.IsNullOrEmpty(usingScope.NamespaceName) ? element : usingScope.NamespaceName + "." + element);
+				}
+			}
+			if (usings != null) {
+				foreach (string u in usings)
+					usingScope.Usings.Add(MakeReference(u));
+			}
+			if (usingAliases != null) {
+				foreach (var pair in usingAliases)
+					usingScope.UsingAliases.Add(new KeyValuePair<string, TypeOrNamespaceReference>(pair.Key, MakeReference(pair.Value)));
+			}
+			return usingScope.Resolve(compilation);
+		}
+		
 		[Test]
 		public void SimpleNameLookupWithoutContext()
 		{
-			// nothing should be found without specifying any UsingScope - however, the resolver also must not crash
-			resolver.UsingScope = null;
-			Assert.IsTrue(resolver.ResolveSimpleName("System", new IType[0]).IsError);
+			// without any using scope, we still want to find elements of the global namespace:
+			var nrr = (NamespaceResolveResult)resolver.WithCurrentUsingScope(null).ResolveSimpleName("System", new IType[0]);
+			Assert.AreEqual("System", nrr.NamespaceName);
 		}
 		
 		[Test]
@@ -26,29 +71,29 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 		{
 			NamespaceResolveResult nrr = (NamespaceResolveResult)resolver.ResolveSimpleName("System", new IType[0]);
 			Assert.AreEqual("System", nrr.NamespaceName);
-			Assert.AreSame(SharedTypes.UnknownType, nrr.Type);
+			Assert.AreSame(SpecialType.UnknownType, nrr.Type);
 		}
 		
 		[Test]
 		public void NamespaceInParentNamespaceLookup()
 		{
-			resolver.UsingScope = MakeUsingScope("System.Collections.Generic");
-			NamespaceResolveResult nrr = (NamespaceResolveResult)resolver.ResolveSimpleName("Text", new IType[0]);
+			var resolverWithUsing = resolver.WithCurrentUsingScope(MakeUsingScope("System.Collections.Generic"));
+			NamespaceResolveResult nrr = (NamespaceResolveResult)resolverWithUsing.ResolveSimpleName("Text", new IType[0]);
 			Assert.AreEqual("System.Text", nrr.NamespaceName);
 		}
 		
 		[Test]
 		public void NamespacesAreNotImported()
 		{
-			AddUsing("System");
-			Assert.IsTrue(resolver.ResolveSimpleName("Collections", new IType[0]).IsError);
+			var resolverWithUsing = resolver.WithCurrentUsingScope(MakeUsingScope(usings: new [] { "System" }));
+			Assert.IsTrue(resolverWithUsing.ResolveSimpleName("Collections", new IType[0]).IsError);
 		}
 		
 		[Test]
 		public void ImportedType()
 		{
-			AddUsing("System");
-			TypeResolveResult trr = (TypeResolveResult)resolver.ResolveSimpleName("String", new IType[0]);
+			var resolverWithUsing = resolver.WithCurrentUsingScope(MakeUsingScope(usings: new [] { "System" }));
+			TypeResolveResult trr = (TypeResolveResult)resolverWithUsing.ResolveSimpleName("String", new IType[0]);
 			Assert.AreEqual("System.String", trr.Type.FullName);
 		}
 		
@@ -76,35 +121,37 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 		[Test]
 		public void AliasToImportedType()
 		{
-			AddUsing("System");
-			AddUsingAlias("x", "String");
-			TypeResolveResult trr = (TypeResolveResult)resolver.ResolveSimpleName("x", new IType[0]);
-			// Unknown type (as String isn't looked up in System)
-			Assert.AreSame(SharedTypes.UnknownType, trr.Type);
+			var resolverWithUsing = resolver.WithCurrentUsingScope(MakeUsingScope(usings: new [] { "System" }, usingAliases: new [] { new KeyValuePair<string, string>( "x", "String" )}));
+			UnknownIdentifierResolveResult rr = (UnknownIdentifierResolveResult)resolverWithUsing.ResolveSimpleName("x", new IType[0]);
+			// Unknown identifier (as String isn't looked up in System)
+			Assert.AreEqual("String", rr.Identifier);
 		}
 		
 		[Test]
 		public void AliasToImportedType2()
 		{
-			AddUsing("System");
-			resolver.UsingScope = new UsingScope(resolver.UsingScope, "SomeNamespace");
-			AddUsingAlias("x", "String");
-			TypeResolveResult trr = (TypeResolveResult)resolver.ResolveSimpleName("x", new IType[0]);
+			UsingScope mainUsingScope = new UsingScope();
+			mainUsingScope.Usings.Add(MakeReference("System"));
+			UsingScope nestedUsingScope = new UsingScope(mainUsingScope, "SomeNamespace");
+			nestedUsingScope.UsingAliases.Add(new KeyValuePair<string, TypeOrNamespaceReference>("x", MakeReference("String")));
+			var resolverWithUsing = resolver.WithCurrentUsingScope(nestedUsingScope.Resolve(compilation));
+			
+			TypeResolveResult trr = (TypeResolveResult)resolverWithUsing.ResolveSimpleName("x", new IType[0]);
 			Assert.AreEqual("System.String", trr.Type.FullName);
 		}
 		
 		[Test]
 		public void AliasOperatorOnTypeAlias()
 		{
-			AddUsingAlias("x", "System.String");
-			Assert.IsTrue(resolver.ResolveAlias("x").IsError);
+			var resolverWithUsing = resolver.WithCurrentUsingScope(MakeUsingScope(usingAliases: new [] { new KeyValuePair<string, string>( "x", "System.String" )}));
+			Assert.IsTrue(resolverWithUsing.ResolveAlias("x").IsError);
 		}
 		
 		[Test]
 		public void AliasOperatorOnNamespaceAlias()
 		{
-			AddUsingAlias("x", "System.Collections.Generic");
-			NamespaceResolveResult nrr = (NamespaceResolveResult)resolver.ResolveAlias("x");
+			var resolverWithUsing = resolver.WithCurrentUsingScope(MakeUsingScope(usingAliases: new [] { new KeyValuePair<string, string>( "x", "System.Collections.Generic" )}));
+			NamespaceResolveResult nrr = (NamespaceResolveResult)resolverWithUsing.ResolveAlias("x");
 			Assert.AreEqual("System.Collections.Generic", nrr.NamespaceName);
 		}
 		
@@ -117,32 +164,34 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 		[Test]
 		public void FindClassInCurrentNamespace()
 		{
-			resolver.UsingScope = MakeUsingScope("System.Collections");
-			TypeResolveResult trr = (TypeResolveResult)resolver.ResolveSimpleName("String", new IType[0]);
+			var resolverWithUsing = resolver.WithCurrentUsingScope(MakeUsingScope("System.Collections"));
+			TypeResolveResult trr = (TypeResolveResult)resolverWithUsing.ResolveSimpleName("String", new IType[0]);
 			Assert.AreEqual("System.String", trr.Type.FullName);
 		}
 		
 		[Test]
 		public void FindNeighborNamespace()
 		{
-			resolver.UsingScope = MakeUsingScope("System.Collections");
-			NamespaceResolveResult nrr = (NamespaceResolveResult)resolver.ResolveSimpleName("Text", new IType[0]);
+			var resolverWithUsing = resolver.WithCurrentUsingScope(MakeUsingScope("System.Collections"));
+			NamespaceResolveResult nrr = (NamespaceResolveResult)resolverWithUsing.ResolveSimpleName("Text", new IType[0]);
 			Assert.AreEqual("System.Text", nrr.NamespaceName);
 		}
 		
 		[Test]
 		public void FindTypeParameters()
 		{
-			resolver.UsingScope = MakeUsingScope("System.Collections.Generic");
-			resolver.CurrentTypeDefinition = context.GetTypeDefinition(typeof(List<>));
-			resolver.CurrentMember = resolver.CurrentTypeDefinition.Methods.Single(m => m.Name == "ConvertAll");
+			var listOfT = compilation.FindType(typeof(List<>)).GetDefinition();
+			var resolverWithContext = resolver
+				.WithCurrentUsingScope(MakeUsingScope("System.Collections.Generic"))
+				.WithCurrentTypeDefinition(listOfT)
+				.WithCurrentMember(listOfT.Methods.Single(m => m.Name == "ConvertAll"));
 			
 			TypeResolveResult trr;
-			trr = (TypeResolveResult)resolver.ResolveSimpleName("TOutput", new IType[0]);
-			Assert.AreSame(((IMethod)resolver.CurrentMember).TypeParameters[0], trr.Type);
+			trr = (TypeResolveResult)resolverWithContext.ResolveSimpleName("TOutput", new IType[0]);
+			Assert.AreSame(((IMethod)resolverWithContext.CurrentMember).TypeParameters[0], trr.Type);
 			
-			trr = (TypeResolveResult)resolver.ResolveSimpleName("T", new IType[0]);
-			Assert.AreSame(resolver.CurrentTypeDefinition.TypeParameters[0], trr.Type);
+			trr = (TypeResolveResult)resolverWithContext.ResolveSimpleName("T", new IType[0]);
+			Assert.AreSame(resolverWithContext.CurrentTypeDefinition.TypeParameters[0], trr.Type);
 		}
 		
 		[Test]
@@ -188,30 +237,48 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 			UnknownIdentifierResolveResult result = Resolve<UnknownIdentifierResolveResult>(program);
 			Assert.AreEqual("StringBuilder", result.Identifier);
 			
-			Assert.AreSame(SharedTypes.UnknownType, result.Type);
+			Assert.AreSame(SpecialType.UnknownType, result.Type);
 		}
 		
-		[Test]
-		public void PropertyNameAmbiguousWithTypeName()
-		{
-			string program = @"class A {
+		const string propertyNameAmbiguousWithTypeNameProgram = @"class A {
 	public Color Color { get; set; }
 	
 	void Method() {
 		$
 	}
 }
-class Color { public static readonly Color Empty = null; }
+class Color {
+	public static readonly Color Empty = null;
+	public static int M() { }
+	public int M(int a) { }
+}
 ";
+		
+		[Test]
+		public void PropertyNameAmbiguousWithTypeName()
+		{
+			string program = propertyNameAmbiguousWithTypeNameProgram;
 			TypeResolveResult trr = Resolve<TypeResolveResult>(program.Replace("$", "$Color$ c;"));
 			Assert.AreEqual("Color", trr.Type.Name);
 			
 			MemberResolveResult mrr = Resolve<MemberResolveResult>(program.Replace("$", "x = $Color$;"));
 			Assert.AreEqual("Color", mrr.Member.Name);
-			
+		}
+		
+		[Test]
+		public void PropertyNameAmbiguousWithTypeName_MemberAccessOnAmbiguousIdentifier()
+		{
+			string program = propertyNameAmbiguousWithTypeNameProgram;
 			Resolve<MemberResolveResult>(program.Replace("$", "$Color$ = Color.Empty;"));
 			Resolve<TypeResolveResult>(program.Replace("$", "Color = $Color$.Empty;"));
-			Resolve<MemberResolveResult>(program.Replace("$", "x = $Color$.ToString();"));
+		}
+		
+		[Test]
+		public void PropertyNameAmbiguousWithTypeName_MethodInvocationOnAmbiguousIdentifier()
+		{
+			string program = propertyNameAmbiguousWithTypeNameProgram;
+			Resolve<MemberResolveResult>(program.Replace("$", "x = $Color$.M(1);"));
+			Resolve<TypeResolveResult>(program.Replace("$", "x = $Color$.M();"));
 		}
 		
 		[Test]
@@ -263,7 +330,7 @@ class Color { public static readonly Color Empty = null; }
 			Assert.AreEqual("value", result.Variable.Name);
 		}
 		
-		[Test, Ignore("Anonymous methods not supported in resolver")]
+		[Test]
 		public void AnonymousMethodParameters()
 		{
 			string program = @"using System;
@@ -358,11 +425,11 @@ class TestClass {
 	COL.ArrayList ff;
 }
 ";
-			TypeResolveResult type = Resolve<TypeResolveResult>(program, "COL.ArrayList");
+			TypeResolveResult type = Resolve<TypeResolveResult>(program.Replace("COL.ArrayList", "$COL.ArrayList$"));
 			Assert.IsNotNull(type, "COL.ArrayList should resolve to a type");
 			Assert.AreEqual("System.Collections.ArrayList", type.Type.FullName, "TypeResolveResult");
 			
-			MemberResolveResult member = Resolve<MemberResolveResult>(program, "ff");
+			MemberResolveResult member = Resolve<MemberResolveResult>(program.Replace("ff", "$ff$"));
 			Assert.AreEqual("System.Collections.ArrayList", member.Type.FullName, "the full type should be resolved");
 		}
 		
@@ -390,7 +457,7 @@ class TestClass {
 ";
 			TypeResolveResult trr = Resolve<TypeResolveResult>(program.Replace("COL a", "$COL$ a"));
 			Assert.AreEqual("System.Collections.ArrayList", trr.Type.FullName, "COL");
-			ResolveResult rr = Resolve<ResolveResult>(program.Replace("new COL()", "$new COL()$"));
+			ResolveResult rr = Resolve<CSharpInvocationResolveResult>(program.Replace("new COL()", "$new COL()$"));
 			Assert.AreEqual("System.Collections.ArrayList", rr.Type.FullName, "a");
 		}
 		
@@ -463,7 +530,7 @@ namespace A.B {
 		
 		
 		[Test]
-		public void InnerTypeResolve ()
+		public void InnerTypeResolve1 ()
 		{
 			string program = @"public class C<T> { public class Inner { } }
 class TestClass {
@@ -474,19 +541,23 @@ class TestClass {
 ";
 			TypeResolveResult trr = Resolve<TypeResolveResult>(program);
 			Assert.AreEqual("C.Inner", trr.Type.FullName);
-			
-			program = @"public class C<T> { public class D<S,U> { public class Inner { } }}
+		}
+		
+		[Test]
+		public void InnerTypeResolve2 ()
+		{
+			string program = @"public class C<T> { public class D<S,U> { public class Inner { } }}
 class TestClass {
 	void Test() {
 		$C<string>.D<int,TestClass>.Inner$ a;
 	}
 }
 ";
-			trr = Resolve<TypeResolveResult>(program);
+			TypeResolveResult trr = Resolve<TypeResolveResult>(program);
 			Assert.AreEqual("C.D.Inner", trr.Type.FullName);
 		}
 		
-		[Test, Ignore("parser is broken and produces IdentifierExpression instead of PrimitiveType")]
+		[Test]
 		public void ShortMaxValueTest()
 		{
 			string program = @"using System;
@@ -521,7 +592,7 @@ class TestClass {
 			trr = Resolve<TypeResolveResult>(program.Replace("$", "$global::XX.XX$"));
 			Assert.AreEqual("XX.XX", trr.Type.FullName);
 			
-			MemberResolveResult mrr = Resolve<MemberResolveResult>(program.Replace("$", "$XX.Test()$"));
+			InvocationResolveResult mrr = Resolve<CSharpInvocationResolveResult>(program.Replace("$", "$XX.Test()$"));
 			Assert.AreEqual("XX.XX.Test", mrr.Member.FullName);
 		}
 		
@@ -633,7 +704,7 @@ namespace A {
 	class BaseClass {
 		public static string Test() {}
 	}";
-			MemberResolveResult mrr = Resolve<MemberResolveResult>(program.Replace("$", "$BaseClass.Test()$"));
+			MemberResolveResult mrr = Resolve<CSharpInvocationResolveResult>(program.Replace("$", "$BaseClass.Test()$"));
 			Assert.AreEqual("BaseClass.Test", mrr.Member.FullName);
 			
 			mrr = Resolve<MemberResolveResult>(program.Replace("$", "$Test$"));
@@ -643,7 +714,7 @@ namespace A {
 			Assert.AreEqual("DerivedClass.Test", mrr.Member.FullName);
 			
 			// returns BaseClass.Test because DerivedClass.Test is not invocable
-			mrr = Resolve<MemberResolveResult>(program.Replace("$", "$DerivedClass.Test()$"));
+			mrr = Resolve<CSharpInvocationResolveResult>(program.Replace("$", "$DerivedClass.Test()$"));
 			Assert.AreEqual("BaseClass.Test", mrr.Member.FullName);
 		}
 		
@@ -730,7 +801,7 @@ namespace A {
 			Assert.AreEqual("DerivedClass.Test", mrr.Member.FullName);
 		}
 		
-		[Test, Ignore("Resolver Bug")]
+		[Test]
 		public void SD_1487()
 		{
 			string program = @"using System;
@@ -744,12 +815,15 @@ class C1 {
 }";
 			MemberResolveResult mrr;
 			mrr = Resolve<MemberResolveResult>(program.Replace("$", "$Field$"));
+			Assert.IsFalse(mrr.IsError);
 			Assert.AreEqual("C1.Field", mrr.Member.FullName);
 			
 			mrr = Resolve<MemberResolveResult>(program.Replace("$", "$C1.Field$"));
+			Assert.IsFalse(mrr.IsError);
 			Assert.AreEqual("C1.Field", mrr.Member.FullName);
 			
 			mrr = Resolve<MemberResolveResult>(program.Replace("$", "$C2.Field$"));
+			Assert.IsFalse(mrr.IsError);
 			Assert.AreEqual("C1.Field", mrr.Member.FullName);
 		}
 		
@@ -764,10 +838,10 @@ class Test {
 }";
 			MemberResolveResult rr = Resolve<MemberResolveResult>(program);
 			Assert.AreEqual("System.Nullable.Value", rr.Member.FullName);
-			Assert.AreEqual("System.Int32", rr.Member.ReturnType.Resolve(context).FullName);
+			Assert.AreEqual("System.Int32", rr.Member.ReturnType.FullName);
 		}
 		
-		[Test, Ignore("Resolver bug")]
+		[Test]
 		public void MethodHidesEvent()
 		{
 			// see SD-1542
@@ -788,7 +862,7 @@ class Form {
 			Assert.AreEqual("Test.KeyDown", mgrr.Methods.Single().FullName);
 		}
 		
-		[Test, Ignore("partial classes not yet supported")]
+		[Test]
 		public void ProtectedMemberVisibleWhenBaseTypeReferenceIsInOtherPart()
 		{
 			string program = @"using System;
@@ -804,6 +878,69 @@ class B
 }";
 			var mrr = Resolve<MemberResolveResult>(program);
 			Assert.AreEqual("B.x", mrr.Member.FullName);
+		}
+		
+		[Test]
+		public void SubstituteClassAndMethodTypeParametersAtOnce()
+		{
+			string program = @"class C<X> { static void M<T>(X a, T b) { $C<T>.M<X>$(b, a); } }";
+			var rr = Resolve<MethodGroupResolveResult>(program);
+			Assert.AreEqual("X", rr.TypeArguments.Single().Name);
+			
+			var m = (SpecializedMethod)rr.Methods.Single();
+			Assert.AreSame(rr.TypeArguments.Single(), m.TypeArguments.Single());
+			Assert.AreEqual("T", m.Parameters[0].Type.Name);
+			Assert.AreEqual("X", m.Parameters[1].Type.Name);
+		}
+		
+		[Test]
+		public void InheritingInnerClassShouldNotCauseStackOverflow()
+		{
+			string program = @"class Test : $Test.Base$, Test.ITest { public class Base {} interface ITest {} }";
+			var result = Resolve<TypeResolveResult>(program);
+			Assert.AreEqual("Test.Base", result.Type.FullName);
+		}
+		
+		[Test]
+		public void InnerClassInheritingFromProtectedBaseInnerClassShouldNotCauseStackOverflow()
+		{
+			string program = @"class Base {
+  protected class NestedBase {}
+}
+class Derived : Base {
+  class NestedDerived : $NestedBase$ { }
+}";
+			var result = Resolve<TypeResolveResult>(program);
+			Assert.AreEqual("Base.NestedBase", result.Type.FullName);
+		}
+		
+		[Test]
+		public void EnumMembersHaveUnderlyingTypeWithinInitializers_MemberFromSameEnum()
+		{
+			string program = @"enum E { A = 0, B = $A$ + 1 }";
+			var result = Resolve<MemberResolveResult>(program);
+			Assert.AreEqual("E.A", result.Member.FullName);
+			Assert.AreEqual("System.Int32", result.Type.ReflectionName);
+			Assert.AreEqual("E", result.Member.ReturnType.ReflectionName);
+		}
+		
+		[Test]
+		public void EnumMembersHaveUnderlyingTypeWithinInitializers_MemberFromOtherEnum()
+		{
+			string program = @"enum A : ushort { X = 1 } enum B { Y = $A.X$ }";
+			var result = Resolve<MemberResolveResult>(program);
+			Assert.AreEqual("A.X", result.Member.FullName);
+			Assert.AreEqual("System.UInt16", result.Type.ReflectionName);
+			Assert.AreEqual("A", result.Member.ReturnType.ReflectionName);
+		}
+		
+		[Test]
+		public void EnumMembersHaveUnderlyingTypeWithinInitializers_RuleDoesNotApplyToAttributes()
+		{
+			string program = @"enum A { X = 1, [SomeAttribute($X$)] Y }";
+			var result = Resolve<MemberResolveResult>(program);
+			Assert.AreEqual("A.X", result.Member.FullName);
+			Assert.AreEqual("A", result.Type.ReflectionName);
 		}
 	}
 }

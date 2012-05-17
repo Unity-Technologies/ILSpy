@@ -1,8 +1,27 @@
-﻿// Copyright (c) 2010 AlphaSierraPapa for the SharpDevelop Team (for details please see \doc\copyright.txt)
-// This code is distributed under MIT X11 license (for details please see \doc\license.txt)
+﻿// Copyright (c) AlphaSierraPapa for the SharpDevelop Team
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
+
+using ICSharpCode.NRefactory.Semantics;
 using ICSharpCode.NRefactory.TypeSystem;
 using ICSharpCode.NRefactory.TypeSystem.Implementation;
 using NUnit.Framework;
@@ -12,23 +31,30 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 	[TestFixture]
 	public class OverloadResolutionTests
 	{
-		readonly ITypeResolveContext context = CecilLoaderTests.Mscorlib;
-		readonly DefaultTypeDefinition dummyClass = new DefaultTypeDefinition(CecilLoaderTests.Mscorlib, string.Empty, "DummyClass");
+		readonly ICompilation compilation = new SimpleCompilation(
+			CecilLoaderTests.SystemCore, new[] { CecilLoaderTests.Mscorlib });
 		
 		ResolveResult[] MakeArgumentList(params Type[] argumentTypes)
 		{
-			return argumentTypes.Select(t => new ResolveResult(t.ToTypeReference().Resolve(context))).ToArray();
+			return argumentTypes.Select(t => new ResolveResult(compilation.FindType(t))).ToArray();
 		}
 		
-		DefaultMethod MakeMethod(params object[] parameterTypesOrDefaultValues)
+		IMethod MakeMethod(params object[] parameterTypesOrDefaultValues)
 		{
-			DefaultMethod m = new DefaultMethod(dummyClass, "Method");
+			var context = new SimpleTypeResolveContext(compilation.MainAssembly);
+			return (IMethod)MakeUnresolvedMethod(parameterTypesOrDefaultValues).CreateResolved(context);
+		}
+		
+		DefaultUnresolvedMethod MakeUnresolvedMethod(params object[] parameterTypesOrDefaultValues)
+		{
+			var m = new DefaultUnresolvedMethod();
+			m.Name = "Method";
 			foreach (var typeOrDefaultValue in parameterTypesOrDefaultValues) {
 				Type type = typeOrDefaultValue as Type;
 				if (type != null)
-					m.Parameters.Add(new DefaultParameter(type.ToTypeReference(), string.Empty));
+					m.Parameters.Add(new DefaultUnresolvedParameter(type.ToTypeReference(), string.Empty));
 				else if (Type.GetTypeCode(typeOrDefaultValue.GetType()) > TypeCode.Object)
-					m.Parameters.Add(new DefaultParameter(typeOrDefaultValue.GetType().ToTypeReference(), string.Empty) {
+					m.Parameters.Add(new DefaultUnresolvedParameter(typeOrDefaultValue.GetType().ToTypeReference(), string.Empty) {
 					                 	DefaultValue = new SimpleConstantValue(typeOrDefaultValue.GetType().ToTypeReference(), typeOrDefaultValue)
 					                 });
 				else
@@ -37,16 +63,17 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 			return m;
 		}
 		
-		DefaultMethod MakeParamsMethod(params object[] parameterTypesOrDefaultValues)
+		IMethod MakeParamsMethod(params object[] parameterTypesOrDefaultValues)
 		{
-			DefaultMethod m = MakeMethod(parameterTypesOrDefaultValues);
-			((DefaultParameter)m.Parameters.Last()).IsParams = true;
-			return m;
+			var m = MakeUnresolvedMethod(parameterTypesOrDefaultValues);
+			((DefaultUnresolvedParameter)m.Parameters.Last()).IsParams = true;
+			var context = new SimpleTypeResolveContext(compilation.MainAssembly);
+			return (IMethod)m.CreateResolved(context);
 		}
 		
-		DefaultParameter MakeOptionalParameter(IType type, string name)
+		IUnresolvedParameter MakeOptionalParameter(ITypeReference type, string name)
 		{
-			return new DefaultParameter(type, name) {
+			return new DefaultUnresolvedParameter(type, name) {
 				DefaultValue = new SimpleConstantValue(type, null)
 			};
 		}
@@ -54,7 +81,7 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 		[Test]
 		public void PreferIntOverUInt()
 		{
-			OverloadResolution r = new OverloadResolution(context, MakeArgumentList(typeof(ushort)));
+			OverloadResolution r = new OverloadResolution(compilation, MakeArgumentList(typeof(ushort)));
 			var c1 = MakeMethod(typeof(int));
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(c1));
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(MakeMethod(typeof(uint))));
@@ -65,7 +92,7 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 		[Test]
 		public void NullableIntAndNullableUIntIsAmbiguous()
 		{
-			OverloadResolution r = new OverloadResolution(context, MakeArgumentList(typeof(ushort?)));
+			OverloadResolution r = new OverloadResolution(compilation, MakeArgumentList(typeof(ushort?)));
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(MakeMethod(typeof(int?))));
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(MakeMethod(typeof(uint?))));
 			Assert.AreEqual(OverloadResolutionErrors.AmbiguousMatch, r.BestCandidateErrors);
@@ -79,7 +106,7 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 		[Test]
 		public void ParamsMethodMatchesEmptyArgumentList()
 		{
-			OverloadResolution r = new OverloadResolution(context, MakeArgumentList());
+			OverloadResolution r = new OverloadResolution(compilation, MakeArgumentList());
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(MakeParamsMethod(typeof(int[]))));
 			Assert.IsTrue(r.BestCandidateIsExpandedForm);
 		}
@@ -87,7 +114,7 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 		[Test]
 		public void ParamsMethodMatchesOneArgumentInExpandedForm()
 		{
-			OverloadResolution r = new OverloadResolution(context, MakeArgumentList(typeof(int)));
+			OverloadResolution r = new OverloadResolution(compilation, MakeArgumentList(typeof(int)));
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(MakeParamsMethod(typeof(int[]))));
 			Assert.IsTrue(r.BestCandidateIsExpandedForm);
 		}
@@ -95,7 +122,7 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 		[Test]
 		public void ParamsMethodMatchesInUnexpandedForm()
 		{
-			OverloadResolution r = new OverloadResolution(context, MakeArgumentList(typeof(int[])));
+			OverloadResolution r = new OverloadResolution(compilation, MakeArgumentList(typeof(int[])));
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(MakeParamsMethod(typeof(int[]))));
 			Assert.IsFalse(r.BestCandidateIsExpandedForm);
 		}
@@ -103,7 +130,7 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 		[Test]
 		public void LessArgumentsPassedToParamsIsBetter()
 		{
-			OverloadResolution r = new OverloadResolution(context, MakeArgumentList(typeof(int), typeof(int), typeof(int)));
+			OverloadResolution r = new OverloadResolution(compilation, MakeArgumentList(typeof(int), typeof(int), typeof(int)));
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(MakeParamsMethod(typeof(int[]))));
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(MakeParamsMethod(typeof(int), typeof(int[]))));
 			Assert.IsFalse(r.IsAmbiguous);
@@ -113,7 +140,7 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 		[Test]
 		public void CallInvalidParamsDeclaration()
 		{
-			OverloadResolution r = new OverloadResolution(context, MakeArgumentList(typeof(int[,])));
+			OverloadResolution r = new OverloadResolution(compilation, MakeArgumentList(typeof(int[,])));
 			Assert.AreEqual(OverloadResolutionErrors.ArgumentTypeMismatch, r.AddCandidate(MakeParamsMethod(typeof(int))));
 			Assert.IsFalse(r.BestCandidateIsExpandedForm);
 		}
@@ -124,7 +151,7 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 			var m1 = MakeMethod();
 			var m2 = MakeMethod(1);
 			
-			OverloadResolution r = new OverloadResolution(context, MakeArgumentList());
+			OverloadResolution r = new OverloadResolution(compilation, MakeArgumentList());
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(m1));
 			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(m2));
 			Assert.IsFalse(r.IsAmbiguous);
@@ -137,49 +164,156 @@ namespace ICSharpCode.NRefactory.CSharp.Resolver
 			// http://msmvps.com/blogs/jon_skeet/archive/2010/11/02/evil-code-overload-resolution-workaround.aspx
 			
 			// static void Foo<T>(T? ignored = default(T?)) where T : struct
-			var m1 = MakeMethod();
-			m1.TypeParameters.Add(new DefaultTypeParameter(EntityType.Method, 0, "T") { HasValueTypeConstraint = true });
+			var m1 = MakeUnresolvedMethod();
+			m1.TypeParameters.Add(new DefaultUnresolvedTypeParameter(EntityType.Method, 0, "T") { HasValueTypeConstraint = true });
 			m1.Parameters.Add(MakeOptionalParameter(
-				NullableType.Create(m1.TypeParameters[0], context),
+				NullableType.Create(new TypeParameterReference(EntityType.Method, 0)),
 				"ignored"
 			));
 			
 			// class ClassConstraint<T> where T : class {}
-			DefaultTypeDefinition classConstraint = new DefaultTypeDefinition(dummyClass, "ClassConstraint");
-			classConstraint.TypeParameters.Add(new DefaultTypeParameter(EntityType.TypeDefinition, 0, "T") { HasReferenceTypeConstraint = true });
+			var classConstraint = new DefaultUnresolvedTypeDefinition(string.Empty, "ClassConstraint");
+			classConstraint.TypeParameters.Add(new DefaultUnresolvedTypeParameter(EntityType.TypeDefinition, 0, "T") { HasReferenceTypeConstraint = true });
 			
 			// static void Foo<T>(ClassConstraint<T> ignored = default(ClassConstraint<T>))
 			// where T : class
-			var m2 = MakeMethod();
-			m2.TypeParameters.Add(new DefaultTypeParameter(EntityType.Method, 0, "T") { HasReferenceTypeConstraint = true });
+			var m2 = MakeUnresolvedMethod();
+			m2.TypeParameters.Add(new DefaultUnresolvedTypeParameter(EntityType.Method, 0, "T") { HasReferenceTypeConstraint = true });
 			m2.Parameters.Add(MakeOptionalParameter(
-				new ParameterizedType(classConstraint, new[] { m2.TypeParameters[0] }),
+				new ParameterizedTypeReference(classConstraint, new[] { new TypeParameterReference(EntityType.Method, 0) }),
 				"ignored"
 			));
 			
 			// static void Foo<T>()
-			var m3 = MakeMethod();
-			m3.TypeParameters.Add(new DefaultTypeParameter(EntityType.Method, 0, "T"));
+			var m3 = MakeUnresolvedMethod();
+			m3.TypeParameters.Add(new DefaultUnresolvedTypeParameter(EntityType.Method, 0, "T"));
+			
+			ICompilation compilation = TypeSystemHelper.CreateCompilation(classConstraint);
+			var context = new SimpleTypeResolveContext(compilation.MainAssembly);
+			IMethod resolvedM1 = (IMethod)m1.CreateResolved(context);
+			IMethod resolvedM2 = (IMethod)m2.CreateResolved(context);
+			IMethod resolvedM3 = (IMethod)m3.CreateResolved(context);
 			
 			// Call: Foo<int>();
 			OverloadResolution o;
-			o = new OverloadResolution(context, new ResolveResult[0], typeArguments: new[] { typeof(int).ToTypeReference().Resolve(context) });
-			Assert.AreEqual(OverloadResolutionErrors.None, o.AddCandidate(m1));
-			Assert.AreEqual(OverloadResolutionErrors.ConstructedTypeDoesNotSatisfyConstraint, o.AddCandidate(m2));
-			Assert.AreSame(m1, o.BestCandidate);
+			o = new OverloadResolution(compilation, new ResolveResult[0], typeArguments: new[] { compilation.FindType(typeof(int)) });
+			Assert.AreEqual(OverloadResolutionErrors.None, o.AddCandidate(resolvedM1));
+			Assert.AreEqual(OverloadResolutionErrors.ConstructedTypeDoesNotSatisfyConstraint, o.AddCandidate(resolvedM2));
+			Assert.AreSame(resolvedM1, o.BestCandidate);
 			
 			// Call: Foo<string>();
-			o = new OverloadResolution(context, new ResolveResult[0], typeArguments: new[] { typeof(string).ToTypeReference().Resolve(context) });
-			Assert.AreEqual(OverloadResolutionErrors.ConstructedTypeDoesNotSatisfyConstraint, o.AddCandidate(m1));
-			Assert.AreEqual(OverloadResolutionErrors.None, o.AddCandidate(m2));
-			Assert.AreSame(m2, o.BestCandidate);
+			o = new OverloadResolution(compilation, new ResolveResult[0], typeArguments: new[] { compilation.FindType(typeof(string)) });
+			Assert.AreEqual(OverloadResolutionErrors.ConstructedTypeDoesNotSatisfyConstraint, o.AddCandidate(resolvedM1));
+			Assert.AreEqual(OverloadResolutionErrors.None, o.AddCandidate(resolvedM2));
+			Assert.AreSame(resolvedM2, o.BestCandidate);
 			
 			// Call: Foo<int?>();
-			o = new OverloadResolution(context, new ResolveResult[0], typeArguments: new[] { typeof(int?).ToTypeReference().Resolve(context) });
-			Assert.AreEqual(OverloadResolutionErrors.ConstructedTypeDoesNotSatisfyConstraint, o.AddCandidate(m1));
-			Assert.AreEqual(OverloadResolutionErrors.ConstructedTypeDoesNotSatisfyConstraint, o.AddCandidate(m2));
-			Assert.AreEqual(OverloadResolutionErrors.None, o.AddCandidate(m3));
-			Assert.AreSame(m3, o.BestCandidate);
+			o = new OverloadResolution(compilation, new ResolveResult[0], typeArguments: new[] { compilation.FindType(typeof(int?)) });
+			Assert.AreEqual(OverloadResolutionErrors.ConstructedTypeDoesNotSatisfyConstraint, o.AddCandidate(resolvedM1));
+			Assert.AreEqual(OverloadResolutionErrors.ConstructedTypeDoesNotSatisfyConstraint, o.AddCandidate(resolvedM2));
+			Assert.AreEqual(OverloadResolutionErrors.None, o.AddCandidate(resolvedM3));
+			Assert.AreSame(resolvedM3, o.BestCandidate);
+		}
+		
+		/// <summary>
+		/// A lambda of the form "() => default(returnType)"
+		/// </summary>
+		class MockLambda : LambdaResolveResult
+		{
+			IType inferredReturnType;
+			List<IParameter> parameters = new List<IParameter>();
+			
+			public MockLambda(IType returnType)
+			{
+				this.inferredReturnType = returnType;
+			}
+			
+			public override IList<IParameter> Parameters {
+				get { return parameters; }
+			}
+			
+			public override Conversion IsValid(IType[] parameterTypes, IType returnType, CSharpConversions conversions)
+			{
+				return conversions.ImplicitConversion(inferredReturnType, returnType);
+			}
+			
+			public override bool IsImplicitlyTyped {
+				get { return false; }
+			}
+			
+			public override bool IsAnonymousMethod {
+				get { return false; }
+			}
+			
+			public override bool HasParameterList {
+				get { return true; }
+			}
+			
+			public override bool IsAsync {
+				get { return false; }
+			}
+			
+			public override ResolveResult Body {
+				get { throw new NotImplementedException(); }
+			}
+			
+			public override IType GetInferredReturnType(IType[] parameterTypes)
+			{
+				return inferredReturnType;
+			}
+		}
+		
+		[Test]
+		public void BetterConversionByLambdaReturnValue()
+		{
+			var m1 = MakeMethod(typeof(Func<long>));
+			var m2 = MakeMethod(typeof(Func<int>));
+			
+			// M(() => default(byte));
+			ResolveResult[] args = {
+				new MockLambda(compilation.FindType(KnownTypeCode.Byte))
+			};
+			
+			OverloadResolution r = new OverloadResolution(compilation, args);
+			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(m1));
+			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(m2));
+			Assert.AreSame(m2, r.BestCandidate);
+			Assert.AreEqual(OverloadResolutionErrors.None, r.BestCandidateErrors);
+		}
+		
+		[Test]
+		public void BetterConversionByLambdaReturnValue_ExpressionTree()
+		{
+			var m1 = MakeMethod(typeof(Func<long>));
+			var m2 = MakeMethod(typeof(Expression<Func<int>>));
+			
+			// M(() => default(byte));
+			ResolveResult[] args = {
+				new MockLambda(compilation.FindType(KnownTypeCode.Byte))
+			};
+			
+			OverloadResolution r = new OverloadResolution(compilation, args);
+			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(m1));
+			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(m2));
+			Assert.AreSame(m2, r.BestCandidate);
+			Assert.AreEqual(OverloadResolutionErrors.None, r.BestCandidateErrors);
+		}
+		
+		[Test]
+		public void Lambda_DelegateAndExpressionTreeOverloadsAreAmbiguous()
+		{
+			var m1 = MakeMethod(typeof(Func<int>));
+			var m2 = MakeMethod(typeof(Expression<Func<int>>));
+			
+			// M(() => default(int));
+			ResolveResult[] args = {
+				new MockLambda(compilation.FindType(KnownTypeCode.Int32))
+			};
+			
+			OverloadResolution r = new OverloadResolution(compilation, args);
+			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(m1));
+			Assert.AreEqual(OverloadResolutionErrors.None, r.AddCandidate(m2));
+			Assert.AreEqual(OverloadResolutionErrors.AmbiguousMatch, r.BestCandidateErrors);
 		}
 	}
 }

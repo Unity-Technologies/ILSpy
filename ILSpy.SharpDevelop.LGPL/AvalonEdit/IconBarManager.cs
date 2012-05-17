@@ -8,7 +8,9 @@ using System.Collections.Specialized;
 using System.Linq;
 
 using ICSharpCode.ILSpy.Bookmarks;
+using ICSharpCode.ILSpy.Debugger;
 using ICSharpCode.NRefactory.CSharp;
+using Mono.Cecil;
 
 namespace ICSharpCode.ILSpy.AvalonEdit
 {
@@ -41,28 +43,5 @@ namespace ICSharpCode.ILSpy.AvalonEdit
 		}
 		
 		public event EventHandler RedrawRequested;
-		
-		public void UpdateClassMemberBookmarks(IEnumerable<AstNode> nodes, Type bookmarkType, Type memberType)
-		{
-			this.bookmarks.Clear();
-			
-			if (nodes == null || nodes.Count() == 0)
-				return;
-			
-			foreach (var n in nodes) {
-				switch (n.NodeType) {
-					case NodeType.TypeDeclaration:
-					case NodeType.TypeReference:
-						this.bookmarks.Add(Activator.CreateInstance(bookmarkType, n) as IBookmark);
-						break;
-					case NodeType.Member:
-						this.bookmarks.Add(Activator.CreateInstance(memberType, n) as IBookmark);
-						break;
-					default:
-						// do nothing
-						break;
-				}
-			}
-		}
 	}
 }

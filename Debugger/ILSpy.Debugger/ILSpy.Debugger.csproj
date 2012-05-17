@@ -9,8 +9,7 @@
     <AssemblyName>ILSpy.Debugger.Plugin</AssemblyName>
     <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <TargetFrameworkProfile>
-    </TargetFrameworkProfile>
+    <TargetFrameworkProfile>Client</TargetFrameworkProfile>
     <AllowUnsafeBlocks>False</AllowUnsafeBlocks>
     <NoStdLib>False</NoStdLib>
     <WarningLevel>4</WarningLevel>
@@ -87,8 +86,6 @@
     <Compile Include="Models\TreeModel\TreeNode.cs" />
     <Compile Include="Models\TreeModel\Utils.cs" />
     <Compile Include="Services\Debugger\DebuggerHelper.cs" />
-    <Compile Include="Services\Debugger\DebuggerService.cs" />
-    <Compile Include="Services\Debugger\IDebugger.cs" />
     <Compile Include="Services\Debugger\ListHelper.cs" />
     <Compile Include="Services\Debugger\TypeResolverExtension.cs" />
     <Compile Include="Services\Debugger\WindowsDebugger.cs" />
@@ -96,17 +93,23 @@
     <Compile Include="Services\ImageService\ImageService.cs" />
     <Compile Include="Models\RunningProcess.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Services\ParserService\ParserService.cs" />
     <Compile Include="ToolTips\DebuggerPopup.cs" />
     <Compile Include="ToolTips\DebuggerTooltipControl.xaml.cs">
       <DependentUpon>DebuggerTooltipControl.xaml</DependentUpon>
     </Compile>
     <Compile Include="ToolTips\LazyItemsControl.cs" />
-    <Compile Include="ToolTips\Models\ToolTipRequestEventArgs.cs" />
     <Compile Include="ToolTips\TextEditorListener.cs" />
     <Compile Include="ToolTips\VirtualizingIEnumerable.cs" />
     <Compile Include="UI\AttachToProcessWindow.xaml.cs">
       <DependentUpon>AttachToProcessWindow.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="UI\BreakpointPanel.xaml.cs">
+      <DependentUpon>BreakpointPanel.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="UI\CallStackPanel.xaml.cs">
+      <DependentUpon>CallStackPanel.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="UI\DebuggerSettingsPanel.xaml.cs">
@@ -118,18 +121,14 @@
       <SubType>Code</SubType>
     </Compile>
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Images" />
-    <Folder Include="Models\TreeModel" />
-    <Folder Include="Commands" />
-    <Folder Include="ToolTips" />
-    <Folder Include="ToolTips\Models" />
-  </ItemGroup>
+  <ItemGroup />
   <ItemGroup>
     <Page Include="ToolTips\DebuggerTooltipControl.xaml" />
     <Page Include="ToolTips\PinControlsDictionary.xaml" />
     <Page Include="ToolTips\VisualizerPicker.xaml" />
     <Page Include="UI\AttachToProcessWindow.xaml" />
+    <Page Include="UI\BreakpointPanel.xaml" />
+    <Page Include="UI\CallStackPanel.xaml" />
     <Page Include="UI\DebuggerSettingsPanel.xaml" />
     <Page Include="UI\ExecuteProcessWindow.xaml" />
   </ItemGroup>
@@ -153,6 +152,10 @@
     <ProjectReference Include="..\..\Mono.Cecil\Mono.Cecil.csproj">
       <Project>{D68133BD-1E63-496E-9EDE-4FBDBF77B486}</Project>
       <Name>Mono.Cecil</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\NRefactory\ICSharpCode.NRefactory.CSharp\ICSharpCode.NRefactory.CSharp.csproj">
+      <Project>{53DCA265-3C3C-42F9-B647-F72BA678122B}</Project>
+      <Name>ICSharpCode.NRefactory.CSharp</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\NRefactory\ICSharpCode.NRefactory\ICSharpCode.NRefactory.csproj">
       <Project>{3B2A5653-EC97-4001-BB9B-D90F1AF2C371}</Project>
@@ -235,6 +238,9 @@
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Images\application-x-executable.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Images\Break.png" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.Targets" />
 </Project>

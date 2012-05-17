@@ -87,10 +87,13 @@ namespace ICSharpCode.ILSpy.TreeNodes
 				case MethodAttributes.FamANDAssem:
 					return AccessOverlayIcon.Internal;
 				case MethodAttributes.Family:
-				case MethodAttributes.FamORAssem:
 					return AccessOverlayIcon.Protected;
+				case MethodAttributes.FamORAssem:
+					return AccessOverlayIcon.ProtectedInternal;
 				case MethodAttributes.Private:
 					return AccessOverlayIcon.Private;
+				case MethodAttributes.CompilerControlled:
+					return AccessOverlayIcon.CompilerControlled;
 				default:
 					throw new NotSupportedException();
 			}
@@ -147,6 +150,19 @@ namespace ICSharpCode.ILSpy.TreeNodes
 		public override void Decompile(Language language, ITextOutput output, DecompilationOptions options)
 		{
 			language.DecompileProperty(property, output, options);
+		}
+		
+		public override bool IsPublicAPI {
+			get {
+				switch (GetAttributesOfMostAccessibleMethod(property) & MethodAttributes.MemberAccessMask) {
+					case MethodAttributes.Public:
+					case MethodAttributes.Family:
+					case MethodAttributes.FamORAssem:
+						return true;
+					default:
+						return false;
+				}
+			}
 		}
 
 		MemberReference IMemberTreeNode.Member
