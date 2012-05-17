@@ -18,7 +18,6 @@
 
 using System;
 using System.Diagnostics;
-using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -147,8 +146,17 @@ namespace ICSharpCode.Decompiler.ILAst
 			
 			// The simulated path always has to start in the same try-block
 			// in other for the same finally blocks to be executed.
-			
 			if (target == Exit(gotoExpr, new HashSet<ILNode>() { gotoExpr })) {
+
+				// be conservative about gotos ocurring immediately before LoopOrSwitchBreak
+				// instructions for now as the current algorithm fails to recover the structure
+				// of boo (and unityscript) generators with infinite loops:
+				//		i = 0
+				//		while true:
+				//			yield ++i
+				if (IsBeforeLoopOrSwitchBreak(gotoExpr))
+					return false;
+
 				gotoExpr.Code = ILCode.Nop;
 				gotoExpr.Operand = null;
 				if (target is ILExpression)
@@ -173,7 +181,14 @@ namespace ICSharpCode.Decompiler.ILAst
 			
 			return false;
 		}
-		
+
+		private bool IsBeforeLoopOrSwitchBreak(ILExpression gotoExpr)
+		{
+			var nextInstruction = nextSibling[gotoExpr] as ILExpression;
+			return nextInstruction != null
+				&& nextInstruction.Code == ILCode.LoopOrSwitchBreak;
+		}
+
 		/// <summary>
 		/// Get the first expression to be excecuted if the instruction pointer is at the start of the given node.
 		/// Try blocks may not be entered in any way.  If possible, the try block is returned as the node to be executed.
