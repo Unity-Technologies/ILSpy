@@ -292,11 +292,15 @@ namespace ICSharpCode.Decompiler.Ast
 						BinaryOperatorExpression boe;
 						if (byteCode.InferredType is PointerType) {
 							if (byteCode.Arguments[0].ExpectedType is PointerType) {
-								arg2 = DivideBySize(arg2, ((PointerType)byteCode.InferredType).ElementType);
+								if (arg2.Annotation<TypeInformation>().InferredType.IsPrimitive)
+									arg2 = DivideBySize(arg2, ((PointerType)byteCode.InferredType).ElementType);
+
+								
 								boe = new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Add, arg2);
 								boe.AddAnnotation(IntroduceUnsafeModifier.PointerArithmeticAnnotation);
 							} else if (byteCode.Arguments[1].ExpectedType is PointerType) {
-								arg1 = DivideBySize(arg1, ((PointerType)byteCode.InferredType).ElementType);
+								if (arg2.Annotation<TypeInformation>().InferredType.IsPrimitive)
+									arg1 = DivideBySize(arg1, ((PointerType)byteCode.InferredType).ElementType);
 								boe = new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Add, arg2);
 								boe.AddAnnotation(IntroduceUnsafeModifier.PointerArithmeticAnnotation);
 							} else {
@@ -315,7 +319,8 @@ namespace ICSharpCode.Decompiler.Ast
 						BinaryOperatorExpression boe;
 						if (byteCode.InferredType is PointerType) {
 							if (byteCode.Arguments[0].ExpectedType is PointerType) {
-								arg2 = DivideBySize(arg2, ((PointerType)byteCode.InferredType).ElementType);
+								if(arg2.Annotation<TypeInformation>().InferredType.IsPrimitive)
+									arg2 = DivideBySize(arg2, ((PointerType)byteCode.InferredType).ElementType);
 								boe = new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Subtract, arg2);
 								boe.WithAnnotation(IntroduceUnsafeModifier.PointerArithmeticAnnotation);
 							} else {
@@ -327,7 +332,13 @@ namespace ICSharpCode.Decompiler.Ast
 						boe.AddAnnotation(byteCode.Code == ILCode.Sub ? AddCheckedBlocks.UncheckedAnnotation : AddCheckedBlocks.CheckedAnnotation);
 						return boe;
 					}
-					case ILCode.Div:        return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Divide, arg2);
+					case ILCode.Div:
+
+						var removedDivision = RemovePointerArithmeticDivision(arg1, arg2);
+						if (removedDivision != null)
+							return removedDivision;
+
+						return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Divide, arg2);
 					case ILCode.Div_Un:     return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Divide, arg2);
 					case ILCode.Mul:        return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Multiply, arg2).WithAnnotation(AddCheckedBlocks.UncheckedAnnotation);
 					case ILCode.Mul_Ovf:    return new Ast.BinaryOperatorExpression(arg1, BinaryOperatorType.Multiply, arg2).WithAnnotation(AddCheckedBlocks.CheckedAnnotation);
@@ -857,7 +868,22 @@ namespace ICSharpCode.Decompiler.Ast
 					throw new Exception("Unknown OpCode: " + byteCode.Code);
 			}
 		}
-		
+
+		private Expression RemovePointerArithmeticDivision(Expression left, Expression right)
+		{
+			if (!(right is PrimitiveExpression))
+				return null;
+
+			var typeInfo = left.Annotation<TypeInformation>();
+
+			if (!(typeInfo != null && typeInfo.InferredType != null && typeInfo.InferredType.IsPointer))
+				return null;
+
+
+
+			return left;
+		}
+
 		internal static bool CanInferAnonymousTypePropertyNamesFromArguments(IList<Expression> args, IList<ParameterDefinition> parameters)
 		{
 			for (int i = 0; i < args.Count; i++) {
@@ -910,7 +936,11 @@ namespace ICSharpCode.Decompiler.Ast
 			CastExpression cast = expr as CastExpression;
 			if (cast != null && cast.Type is PrimitiveType && ((PrimitiveType)cast.Type).Keyword == "int")
 				expr = cast.Expression.Detach();
-			
+
+			/**CastExpression ptrcast = expr as CastExpression;
+			if (ptrcast != null && ptrcast.Type is SimpleType && (((SimpleType)ptrcast.Type).Identifier == "IntPtr" || ((SimpleType)ptrcast.Type).Identifier == "UIntPtr"))
+				expr = cast.Expression.Detach();**/
+
 			Expression sizeOfExpression;
 			switch (TypeAnalysis.GetInformationAmount(type)) {
 				case 1:
@@ -1204,6 +1234,9 @@ namespace ICSharpCode.Decompiler.Ast
 					return expr.CastTo(AstBuilder.ConvertType(reqType));
 				else
 					return expr;
+			} else if (actualType is PointerType && TypeAnalysis.IsIntegerOrEnum(reqType))
+			{
+				return expr.CastTo(AstBuilder.ConvertType(reqType));
 			} else {
 				bool actualIsIntegerOrEnum = TypeAnalysis.IsIntegerOrEnum(actualType);
 				bool requiredIsIntegerOrEnum = TypeAnalysis.IsIntegerOrEnum(reqType);

@@ -999,7 +999,7 @@ namespace ICSharpCode.Decompiler.ILAst
 			TypeReference leftPreferred = DoInferTypeForExpression(left, expectedType);
 			if (leftPreferred is PointerType) {
 				left.InferredType = left.ExpectedType = leftPreferred;
-				InferTypeForExpression(right, typeSystem.IntPtr);
+				InferTypeForExpression(right, DoInferTypeForExpression(right,null));
 				return leftPreferred;
 			}
 			if (IsEnum(leftPreferred)) {
@@ -1030,7 +1030,7 @@ namespace ICSharpCode.Decompiler.ILAst
 			TypeReference leftPreferred = DoInferTypeForExpression(left, expectedType);
 			if (leftPreferred is PointerType) {
 				left.InferredType = left.ExpectedType = leftPreferred;
-				InferTypeForExpression(right, typeSystem.IntPtr);
+				InferTypeForExpression(right, DoInferTypeForExpression(right, null));
 				return leftPreferred;
 			}
 			if (IsEnum(leftPreferred)) {
@@ -1143,6 +1143,11 @@ namespace ICSharpCode.Decompiler.ILAst
 			return type != null && type.MetadataType == MetadataType.Boolean;
 		}
 		
+		public static bool IsInteger(TypeReference reqType)
+		{
+			return TypeAnalysis.IsIntegerOrEnum(reqType) && !TypeAnalysis.IsEnum(reqType);
+		}
+
 		public static bool IsIntegerOrEnum(TypeReference type)
 		{
 			return IsSigned(type) != null;
@@ -1276,5 +1281,7 @@ namespace ICSharpCode.Decompiler.ILAst
 				return false;
 			return type1.FullName == type2.FullName; // TODO: implement this more efficiently?
 		}
+
+		
 	}
 }

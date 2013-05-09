@@ -4435,7 +4435,7 @@ namespace Mono.CSharp
 					if (rtype.BuiltinType == BuiltinTypeSpec.Type.Long || rtype.BuiltinType == BuiltinTypeSpec.Type.ULong)
 						ec.Emit (OpCodes.Conv_I8);
 
-					Binary.EmitOperatorOpcode (ec, Binary.Operator.Multiply, rtype);
+					//Binary.EmitOperatorOpcode (ec, Binary.Operator.Multiply, rtype);
 				}
 
 				if (left_const == null) {

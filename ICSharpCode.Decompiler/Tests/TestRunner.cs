@@ -153,6 +153,12 @@ namespace ICSharpCode.Decompiler.Tests
 		{
 			TestFile(@"..\..\Tests\UnsafeCode.cs");
 		}
+
+		[Test, Ignore("has incorrect casts to IntPtr")]
+		public void UnsafeCodeBug()
+		{
+			TestFile(@"..\..\Tests\UnsafeCodeBug.cs");
+		}
 		
 		[Test]
 		public void ValueTypes()

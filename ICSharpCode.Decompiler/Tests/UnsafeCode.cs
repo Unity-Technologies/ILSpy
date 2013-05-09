@@ -48,7 +48,8 @@ public class UnsafeCode
 	
 	public unsafe void AddressInMultiDimensionalArray(double[,] matrix)
 	{
-		fixed (double* ptr = &matrix[1, 2]) {
+		fixed (double* ptr = &matrix[1, 2]) 
+		{
 			this.PointerReferenceExpression(ptr);
 		}
 	}
@@ -58,7 +59,7 @@ public class UnsafeCode
 		fixed (char* ptr = text)
 		{
 			char* ptr2 = ptr;
-			while (*ptr2 != 0)
+			while (*(ushort*)ptr2 != 0)
 			{
 				*ptr2 = 'A';
 				ptr2++;
@@ -97,16 +98,42 @@ public class UnsafeCode
 		}
 	}
 	
+	public unsafe void FixedStringAccess(char* ptr2)
+	{
+		ptr2++;
+	}
+
+	private unsafe int TwoCharPointersAddedAndReturnedAsInt(char* a, char* b)
+	{
+		return (int)(a - b);
+	}
+
+	private unsafe int SingleCharSubtractValueReturnedAsInt(char* a)
+	{
+		return (int)(a - 10);
+	}
+
+	private unsafe int SingleCharAddedValueReturnedAsInt(char* a)
+	{
+		return (int)(a + 10);
+	}
+
+
+	private unsafe long TwoCharPointersSubtractedAndReturnedAsLong(char* a, char* b)
+	{
+		return (long)(a - b);
+	}
+
 	public unsafe string StackAlloc(int count)
 	{
 		char* ptr = stackalloc char[count];
-		for (int i = 0; i < count; i++) 
+		for (int i = 0; i < count; i++)
 		{
 			ptr[i] = (char)i;
 		}
 		return this.PointerReferenceExpression((double*)ptr);
 	}
-	
+
 	unsafe ~UnsafeCode()
 	{
 		this.PassPointerAsRefParameter(this.NullPointer);
