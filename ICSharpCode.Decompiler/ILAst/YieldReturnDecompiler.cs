@@ -178,8 +178,8 @@ namespace ICSharpCode.Decompiler.ILAst
 		{
 			if (!(type.DeclaringType != null && type.IsCompilerGenerated()))
 				return false;
-			foreach (TypeReference i in type.Interfaces) {
-				if (i.Namespace == "System.Collections" && i.Name == "IEnumerator")
+			foreach (InterfaceImplementation ii in type.Interfaces) {
+				if (ii.InterfaceType.Namespace == "System.Collections" && ii.InterfaceType.Name == "IEnumerator")
 					return true;
 			}
 			return false;

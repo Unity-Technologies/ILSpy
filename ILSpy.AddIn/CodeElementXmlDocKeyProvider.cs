@@ -61,7 +61,7 @@ namespace ICSharpCode.ILSpy.AddIn
 						else if (memberName.StartsWith("explicit operator")) {
 							memberName = "op_Explicit";
 						}
-						else {
+						/*else {
 							// NRefactory has a handy mapping we can make use of, just need to extract the operator sybol first.
 							string[] memberNameWords = member.Name.Split(' ');
 							if (memberNameWords.Length >= 2) {
@@ -71,7 +71,7 @@ namespace ICSharpCode.ILSpy.AddIn
 									memberName = memberName.Replace(member.Name, operatorName);
 								}
 							}
-						}
+						}*/ // unknown type MonoCSharp
 					}
 				}
 				else if (member.Kind == EnvDTE.vsCMElement.vsCMElementProperty) {
